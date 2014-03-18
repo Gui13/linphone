@@ -2328,6 +2328,24 @@ LINPHONE_PUBLIC bool_t linphone_core_is_provisioning_transient(LinphoneCore *lc)
 
 LINPHONE_PUBLIC int linphone_core_migrate_to_multi_transport(LinphoneCore *lc);
 
+
+/**
+ * Enum listing frequent telephony tones.
+**/
+enum _LinphoneToneID{
+	LinphoneToneUndefined, /**<Not a tone */
+	LinphoneToneBusy, /**<Busy tone */
+	LinphoneToneCallWaiting, /**Call waiting tone */
+	LinphoneToneCallOnHold, /**Call on hold tone */
+	LinphoneToneCallLost /**Tone played when call is abruptly disconnected (media lost)*/
+};
+
+/**
+ * Enum typedef for representing frequent telephony tones.
+**/
+typedef enum _LinphoneToneID LinphoneToneID;
+
+
 LINPHONE_PUBLIC void linphone_core_set_call_error_tone(LinphoneCore *lc, LinphoneReason reason, const char *audiofile);
 
 /**
@@ -2344,6 +2362,7 @@ LINPHONE_PUBLIC void linphone_core_enable_sdp_200_ack(LinphoneCore *lc, bool_t e
 **/
 LINPHONE_PUBLIC bool_t linphone_core_sdp_200_ack_enabled(const LinphoneCore *lc);
 
+LINPHONE_PUBLIC void linphone_core_set_tone(LinphoneCore *lc, LinphoneToneID id, const char *audiofile);
 #ifdef __cplusplus
 }
 #endif

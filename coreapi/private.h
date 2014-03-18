@@ -586,13 +586,6 @@ struct _LinphoneConference{
 	bool_t local_muted;
 };
 
-typedef enum _LinphoneToneID{
-	LinphoneToneUndefined,
-	LinphoneToneBusy,
-	LinphoneToneCallWaiting,
-	LinphoneToneCallOnHold,
-	LinphoneToneCallFailed
-}LinphoneToneID;
 
 typedef struct _LinphoneToneDescription{
 	LinphoneReason reason;
@@ -606,6 +599,9 @@ LinphoneToneDescription *linphone_core_get_call_error_tone(const LinphoneCore *l
 void linphone_core_play_call_error_tone(LinphoneCore *lc, LinphoneReason reason);
 void _linphone_core_set_call_error_tone(LinphoneCore *lc, LinphoneReason reason, LinphoneToneID id, const char *audiofile);
 int _linphone_core_accept_call_update(LinphoneCore *lc, LinphoneCall *call, const LinphoneCallParams *params);
+void _linphone_core_set_tone(LinphoneCore *lc, LinphoneReason reason, LinphoneToneID id, const char *audiofile);
+const char *linphone_core_get_tone_file(const LinphoneCore *lc, LinphoneToneID id);
+
 typedef struct _LinphoneConference LinphoneConference;
 
 struct _LinphoneCore
