@@ -1854,7 +1854,7 @@ static void linphone_call_start_audio_stream(LinphoneCall *call, const char *cna
 		playfile=lc->play_file;
 		recfile=lc->rec_file;
 		call->audio_profile=make_profile(call,call->resultdesc,stream,&used_pt);
-		call->audio_reporting=ms_new0(reporting_session_report_t,1);
+		call->reports[LINPHONE_CALL_STATS_AUDIO]=ms_new0(reporting_session_report_t,1);
 
 		if (used_pt!=-1){
 			call->current_params.audio_codec = rtp_profile_get_payload(call->audio_profile, used_pt);
@@ -1982,7 +1982,7 @@ static void linphone_call_start_video_stream(LinphoneCall *call, const char *cna
 		const SalStreamDescription *local_st_desc=sal_media_description_find_stream(call->localdesc,vstream->proto,SalVideo);
 		
 		call->video_profile=make_profile(call,call->resultdesc,vstream,&used_pt);
-		call->video_reporting=ms_new0(reporting_session_report_t,1);
+		call->reports[LINPHONE_CALL_STATS_VIDEO]=ms_new0(reporting_session_report_t,1);
 
 		if (used_pt!=-1){
 			VideoStreamDir dir=VideoStreamSendRecv;
@@ -2754,6 +2754,7 @@ void linphone_call_background_tasks(LinphoneCall *call, bool_t one_second_elapse
 				evd->packet = NULL;
 				call->stats[LINPHONE_CALL_STATS_VIDEO].updated = LINPHONE_CALL_STATS_RECEIVED_RTCP_UPDATE;
 				update_local_stats(&call->stats[LINPHONE_CALL_STATS_VIDEO],(MediaStream*)call->videostream);
+				linphone_reporting_call_stats_updated(call, LINPHONE_CALL_STATS_VIDEO);
 				if (lc->vtable.call_stats_updated)
 					lc->vtable.call_stats_updated(lc, call, &call->stats[LINPHONE_CALL_STATS_VIDEO]);
 			} else if (evt == ORTP_EVENT_RTCP_PACKET_EMITTED) {
@@ -2764,6 +2765,7 @@ void linphone_call_background_tasks(LinphoneCall *call, bool_t one_second_elapse
 				evd->packet = NULL;
 				call->stats[LINPHONE_CALL_STATS_VIDEO].updated = LINPHONE_CALL_STATS_SENT_RTCP_UPDATE;
 				update_local_stats(&call->stats[LINPHONE_CALL_STATS_VIDEO],(MediaStream*)call->videostream);
+				linphone_reporting_call_stats_updated(call, LINPHONE_CALL_STATS_VIDEO);
 				if (lc->vtable.call_stats_updated)
 					lc->vtable.call_stats_updated(lc, call, &call->stats[LINPHONE_CALL_STATS_VIDEO]);
 			} else if ((evt == ORTP_EVENT_ICE_SESSION_PROCESSING_FINISHED) || (evt == ORTP_EVENT_ICE_GATHERING_FINISHED)
@@ -2799,6 +2801,7 @@ void linphone_call_background_tasks(LinphoneCall *call, bool_t one_second_elapse
 				evd->packet = NULL;
 				call->stats[LINPHONE_CALL_STATS_AUDIO].updated = LINPHONE_CALL_STATS_RECEIVED_RTCP_UPDATE;
 				update_local_stats(&call->stats[LINPHONE_CALL_STATS_AUDIO],(MediaStream*)call->audiostream);
+				linphone_reporting_call_stats_updated(call, LINPHONE_CALL_STATS_AUDIO);
 				if (lc->vtable.call_stats_updated)
 					lc->vtable.call_stats_updated(lc, call, &call->stats[LINPHONE_CALL_STATS_AUDIO]);
 			} else if (evt == ORTP_EVENT_RTCP_PACKET_EMITTED) {
@@ -2809,6 +2812,7 @@ void linphone_call_background_tasks(LinphoneCall *call, bool_t one_second_elapse
 				evd->packet = NULL;
 				call->stats[LINPHONE_CALL_STATS_AUDIO].updated = LINPHONE_CALL_STATS_SENT_RTCP_UPDATE;
 				update_local_stats(&call->stats[LINPHONE_CALL_STATS_AUDIO],(MediaStream*)call->audiostream);
+				linphone_reporting_call_stats_updated(call, LINPHONE_CALL_STATS_AUDIO);
 				if (lc->vtable.call_stats_updated)
 					lc->vtable.call_stats_updated(lc, call, &call->stats[LINPHONE_CALL_STATS_AUDIO]);
 			} else if ((evt == ORTP_EVENT_ICE_SESSION_PROCESSING_FINISHED) || (evt == ORTP_EVENT_ICE_GATHERING_FINISHED)
