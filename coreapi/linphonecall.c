@@ -478,9 +478,6 @@ static void linphone_call_init_common(LinphoneCall *call, LinphoneAddress *from,
 	call->camera_enabled=TRUE;
 	call->current_params.media_encryption=LinphoneMediaEncryptionNone;
 
-	call->log->reports[LINPHONE_CALL_STATS_AUDIO]=linphone_reporting_new();
-	call->log->reports[LINPHONE_CALL_STATS_VIDEO]=linphone_reporting_new();
-
 	linphone_core_get_audio_port_range(call->core, &min_port, &max_port);
 	port_config_set(call,0,min_port,max_port);
 	
