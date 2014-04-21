@@ -1276,7 +1276,6 @@ static void call_with_declined_srtp(void) {
 }
 
 static void call_base(LinphoneMediaEncryption mode, bool_t enable_video,bool_t enable_relay,LinphoneFirewallPolicy policy) {
-	int i=0;
 	LinphoneCoreManager* marie = linphone_core_manager_new( "marie_rc");
 	LinphoneCoreManager* pauline = linphone_core_manager_new( "pauline_rc");
 	if (enable_relay) {
@@ -1319,6 +1318,7 @@ static void call_base(LinphoneMediaEncryption mode, bool_t enable_video,bool_t e
 			CU_ASSERT_TRUE(check_ice(pauline,marie,LinphoneIceStateHostConnection));
 #ifdef VIDEO_ENABLED
 		if (enable_video) {
+			int i=0;
 			if (linphone_core_video_supported(marie->lc)) {
 				for (i=0;i<100;i++) { /*fixme to workaround a crash*/
 					ms_usleep(20000);
@@ -1357,15 +1357,19 @@ static void call_base(LinphoneMediaEncryption mode, bool_t enable_video,bool_t e
 	linphone_core_manager_destroy(pauline);
 }
 
+#ifdef VIDEO_ENABLED
 static void srtp_video_ice_call(void) {
 	call_base(LinphoneMediaEncryptionSRTP,TRUE,FALSE,LinphonePolicyUseIce);
-}
-static void srtp_ice_call(void) {
-	call_base(LinphoneMediaEncryptionSRTP,FALSE,FALSE,LinphonePolicyUseIce);
 }
 static void zrtp_video_ice_call(void) {
 	call_base(LinphoneMediaEncryptionZRTP,TRUE,FALSE,LinphonePolicyUseIce);
 }
+#endif
+
+static void srtp_ice_call(void) {
+	call_base(LinphoneMediaEncryptionSRTP,FALSE,FALSE,LinphonePolicyUseIce);
+}
+
 static void zrtp_ice_call(void) {
 	call_base(LinphoneMediaEncryptionZRTP,FALSE,FALSE,LinphonePolicyUseIce);
 }
