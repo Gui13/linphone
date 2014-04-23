@@ -10,10 +10,9 @@ before_install:
   - ./configure
   - make -j4
   - sudo make install
-
-
-before_script:
+  - cd ..
   - ./autogen.sh
+
 
 script:
   - ./configure
