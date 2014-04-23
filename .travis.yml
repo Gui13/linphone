@@ -1,0 +1,21 @@
+language: c
+
+
+before_install:
+  - sudo apt-get update -qq
+  - sudo apt-get install libantlr3c-dev antlr3 libcunit1-dev 
+  - git clone https://github.com/Gui13/belle-sip.git
+  - cd belle-sip
+  - ./autogen.sh
+  - ./configure
+  - make -j4
+  - make install
+
+
+before_script:
+
+script:
+  - ./configure
+  - make -j4
+
+
