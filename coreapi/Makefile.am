@@ -161,6 +161,7 @@ AM_CFLAGS+= -DUSE_BELLESIP
 AM_CXXFLAGS=$(AM_CFLAGS)
 
 make_gitversion_h:
+ifndef $(SKIP_GITCHECK)
 	if test "$(GITDESCRIBE)" != "" ; then \
 		if test "$(GIT_TAG)" != "$(PACKAGE_VERSION)" ; then \
 			echo "*** PACKAGE_VERSION and git tag differ. Please put them identical."; \
@@ -179,5 +180,8 @@ make_gitversion_h:
 		cp -f $(GITVERSION_FILE_TMP) $(srcdir)/$(GITVERSION_FILE) ; \
 	fi
 	rm -f $(GITVERSION_FILE_TMP) ;
+else
+	$(ECHO) -n "" > $(srcdir)/$(GITVERSION_FILE)
+endif
 
 $(GITVERSION_FILE): make_gitversion_h
