@@ -742,6 +742,17 @@ AC_SUBST([MS2_DIR])
 
 
 
+AC_ARG_ENABLE(skipgit,
+	[AS_HELP_STRING([--enable-gitcheck=[yes/no]], [Turn on git version checking])],
+	[case "${enableval}" in
+		yes)	enable_gitcheck=true ;;
+		no)	enable_gitcheck=false ;;
+		*)	AC_MSG_ERROR(bad value ${enableval} for --enable-tunnel) ;;
+	esac],
+	[enable_gitcheck=true]
+)
+AM_CONDITIONAL(SKIP_GITCHECK, test x$enable_gitcheck = xfalse)
+
 AC_ARG_ENABLE(tunnel,
 	[AS_HELP_STRING([--enable-tunnel=[yes/no]], [Turn on compilation of tunnel support (default=no)])],
 	[case "${enableval}" in
@@ -766,6 +777,8 @@ AC_ARG_ENABLE(msg-storage,
 	esac],
 	[enable_msg_storage=auto]
 )
+
+
 
 
 AM_CONDITIONAL(BUILD_MSG_STORAGE, test x$enable_msg_storage = xtrue)

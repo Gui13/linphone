@@ -181,6 +181,7 @@ if !SKIP_GITCHECK
 	fi
 	rm -f $(GITVERSION_FILE_TMP) ;
 else
+	echo "Skipping git check"
 	$(ECHO) -n "" > $(srcdir)/$(GITVERSION_FILE)
 endif
 
