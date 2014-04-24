@@ -161,7 +161,7 @@ AM_CFLAGS+= -DUSE_BELLESIP
 AM_CXXFLAGS=$(AM_CFLAGS)
 
 make_gitversion_h:
-ifndef $(SKIP_GITCHECK)
+if !SKIP_GITCHECK
 	if test "$(GITDESCRIBE)" != "" ; then \
 		if test "$(GIT_TAG)" != "$(PACKAGE_VERSION)" ; then \
 			echo "*** PACKAGE_VERSION and git tag differ. Please put them identical."; \
