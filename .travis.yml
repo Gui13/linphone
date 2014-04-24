@@ -11,13 +11,10 @@ before_install:
   - make -j4
   - sudo make install
   - cd ..
-  - export SKIP_GITCHECK=1
-  - ./autogen.sh
 
 
 script:
-  - export SKIP_GITCHECK=1
-  - cmake
+  - cmake .
   - make -j4
 
 
