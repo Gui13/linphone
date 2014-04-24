@@ -608,11 +608,9 @@ LinphoneToneDescription * linphone_tone_description_new(LinphoneReason reason, L
 void linphone_tone_description_destroy(LinphoneToneDescription *obj);
 LinphoneToneDescription *linphone_core_get_call_error_tone(const LinphoneCore *lc, LinphoneReason reason);
 void linphone_core_play_call_error_tone(LinphoneCore *lc, LinphoneReason reason);
-void _linphone_core_set_call_error_tone(LinphoneCore *lc, LinphoneReason reason, LinphoneToneID id, const char *audiofile);
-int _linphone_core_accept_call_update(LinphoneCore *lc, LinphoneCall *call, const LinphoneCallParams *params);
 void _linphone_core_set_tone(LinphoneCore *lc, LinphoneReason reason, LinphoneToneID id, const char *audiofile);
 const char *linphone_core_get_tone_file(const LinphoneCore *lc, LinphoneToneID id);
-
+int _linphone_core_accept_call_update(LinphoneCore *lc, LinphoneCall *call, const LinphoneCallParams *params);
 typedef struct _LinphoneConference LinphoneConference;
 
 struct _LinphoneCore

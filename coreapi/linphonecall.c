@@ -1462,8 +1462,7 @@ int linphone_call_prepare_ice(LinphoneCall *call, bool_t incoming_offer){
 		_linphone_call_prepare_ice_for_stream(call,0,TRUE);
 		if (has_video) _linphone_call_prepare_ice_for_stream(call,1,TRUE);
 		/*start ICE gathering*/
-
-		if (incoming_offer) 
+		if (incoming_offer)
 			linphone_core_update_ice_from_remote_media_description(call,remote); /*this may delete the ice session*/
 		if (call->ice_session && !ice_session_candidates_gathered(call->ice_session)){
 			if (call->audiostream->ms.state==MSStreamInitialized)
