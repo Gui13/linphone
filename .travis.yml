@@ -6,6 +6,7 @@ before_install:
   - git fetch
   - git pull --unshallow
   - sudo apt-get install libantlr3c-dev antlr3 libcunit1-dev libtool intltool libgtk2.0-dev libspeexdsp-dev libavcodec-dev libswscale-dev libx11-dev libxv-dev libgl1-mesa-dev libglew1.6-dev libv4l-dev libxml2-dev
+  - nm --dynamic /usr/lib/libcunit.so |grep get_suite
   - git clone https://github.com/Gui13/belle-sip.git
   - cd belle-sip
   - ./autogen.sh
