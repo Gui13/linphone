@@ -3,9 +3,8 @@ language: c
 
 before_install:
   - sudo apt-get update
-  - git pull --depth -1
-  - git fetch --tags
   - git fetch
+  - git pull --unshallow
   - sudo apt-get install libantlr3c-dev antlr3 libcunit1-dev libtool intltool libgtk2.0-dev libspeexdsp-dev libavcodec-dev libswscale-dev libx11-dev libxv-dev libgl1-mesa-dev libglew1.6-dev libv4l-dev libxml2-dev
   - git clone https://github.com/Gui13/belle-sip.git
   - cd belle-sip
