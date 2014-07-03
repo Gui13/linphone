@@ -77,6 +77,11 @@ bool_t linphone_core_payload_type_enabled(LinphoneCore *lc, const PayloadType *p
 	return FALSE;
 }
 
+bool_t linphone_core_payload_type_is_vbr(LinphoneCore *lc, const PayloadType *pt){
+	if (pt->type==PAYLOAD_VIDEO) return TRUE;
+	return !!(pt->flags & PAYLOAD_TYPE_IS_VBR);
+}
+
 int linphone_core_enable_payload_type(LinphoneCore *lc, PayloadType *pt, bool_t enabled){
 	if (ms_list_find(lc->codecs_conf.audio_codecs,pt) || ms_list_find(lc->codecs_conf.video_codecs,pt)){
 		payload_type_set_enable(pt,enabled);
@@ -103,62 +108,125 @@ const char *linphone_core_get_payload_type_description(LinphoneCore *lc, Payload
 	return NULL;
 }
 
-
-/*this function makes a special case for speex/8000.
-This codec is variable bitrate. The 8kbit/s mode is interesting when having a low upload bandwidth, but its quality
-is not very good. We 'd better use its 15kbt/s mode when we have enough bandwidth*/
-static int get_codec_bitrate(LinphoneCore *lc, const PayloadType *pt){
-	int upload_bw=linphone_core_get_upload_bandwidth(lc);
-	if (bandwidth_is_greater(upload_bw,129) || (bandwidth_is_greater(upload_bw,33) && !linphone_core_video_enabled(lc)) ) {
-		if (strcmp(pt->mime_type,"speex")==0 && pt->clock_rate==8000){
-			return 15000;
+void linphone_core_set_payload_type_bitrate(LinphoneCore *lc, PayloadType *pt, int bitrate){
+	if (ms_list_find(lc->codecs_conf.audio_codecs, (PayloadType*) pt) || ms_list_find(lc->codecs_conf.video_codecs, (PayloadType*)pt)){
+		if (pt->type==PAYLOAD_VIDEO || pt->flags & PAYLOAD_TYPE_IS_VBR){
+			pt->normal_bitrate=bitrate*1000;
+			pt->flags|=PAYLOAD_TYPE_BITRATE_OVERRIDE;
+		}else{
+			ms_error("Cannot set an explicit bitrate for codec %s/%i, because it is not VBR.",pt->mime_type,pt->clock_rate);
+			return;
 		}
 	}
-	return pt->normal_bitrate;
+	ms_error("linphone_core_set_payload_type_bitrate() payload type not in audio or video list !");
 }
+
 
 /*
  *((codec-birate*ptime/8) + RTP header + UDP header + IP header)*8/ptime;
  *ptime=1/npacket
  */
-static double get_audio_payload_bandwidth(LinphoneCore *lc, const PayloadType *pt){
+
+static double get_audio_payload_bandwidth_from_codec_bitrate(const PayloadType *pt){
 	double npacket=50;
 	double packet_size;
 	int bitrate;
+	
 	if (strcmp(payload_type_get_mime(&payload_type_aaceld_44k), payload_type_get_mime(pt))==0) {
 		/*special case of aac 44K because ptime= 10ms*/
 		npacket=100;
+	}else if (strcmp(payload_type_get_mime(&payload_type_ilbc), payload_type_get_mime(pt))==0) {
+		npacket=1000/30.0;
 	}
 
-	bitrate=get_codec_bitrate(lc,pt);
+	bitrate=pt->normal_bitrate;
 	packet_size= (((double)bitrate)/(npacket*8))+UDP_HDR_SZ+RTP_HDR_SZ+IP4_HDR_SZ;
 	return packet_size*8.0*npacket;
 }
 
-void linphone_core_update_allocated_audio_bandwidth_in_call(LinphoneCall *call, const PayloadType *pt){
-	call->audio_bw=(int)(ceil(get_audio_payload_bandwidth(call->core,pt)/1000.0)); /*rounding codec bandwidth should be avoid, specially for AMR*/
+typedef struct vbr_codec_bitrate{
+	int max_avail_bitrate;
+	int min_rate;
+	int recomended_bitrate;
+}vbr_codec_bitrate_t;
+
+static vbr_codec_bitrate_t defauls_vbr[]={
+	//{ 100, 44100, 100 },
+	{ 64, 44100, 50 },
+	{ 64, 16000, 40 },
+	{ 32, 16000, 32 },
+	{ 32, 8000, 32 },
+	{ 0 , 8000, 24 },
+	{ 0 , 0, 0 }
+};
+
+static int lookup_vbr_typical_bitrate(int maxbw, int clock_rate){
+	vbr_codec_bitrate_t *it;
+	if (maxbw<=0) maxbw=defauls_vbr[0].max_avail_bitrate;
+	for(it=defauls_vbr;it->min_rate!=0;it++){
+		if (maxbw>=it->max_avail_bitrate && clock_rate>=it->min_rate)
+			return it->recomended_bitrate;
+	}
+	ms_error("lookup_vbr_typical_bitrate(): should not happen.");
+	return 32;
+}
+
+static int get_audio_payload_bandwidth(LinphoneCore *lc, const PayloadType *pt, int maxbw){
+	if (linphone_core_payload_type_is_vbr(lc,pt)){
+		if (pt->flags & PAYLOAD_TYPE_BITRATE_OVERRIDE){
+			ms_message("PayloadType %s/%i has bitrate override",pt->mime_type,pt->clock_rate);
+			return pt->normal_bitrate/1000;
+		}
+		return lookup_vbr_typical_bitrate(maxbw,pt->clock_rate);
+	}else return (int)ceil(get_audio_payload_bandwidth_from_codec_bitrate(pt)/1000.0);/*rounding codec bandwidth should be avoid, specially for AMR*/
+}
+
+int linphone_core_get_payload_type_bitrate(LinphoneCore *lc, const PayloadType *pt){
+	int maxbw=get_min_bandwidth(linphone_core_get_download_bandwidth(lc),
+					linphone_core_get_upload_bandwidth(lc));
+	if (pt->type==PAYLOAD_AUDIO_CONTINUOUS || pt->type==PAYLOAD_AUDIO_PACKETIZED){
+		return get_audio_payload_bandwidth(lc,pt,maxbw);
+	}else if (pt->type==PAYLOAD_VIDEO){
+		int video_bw;
+		linphone_core_update_allocated_audio_bandwidth(lc);
+		if (maxbw<=0) {
+			video_bw=1500; /*default bitrate for video stream when no bandwidth limit is set, around 1.5 Mbit/s*/
+		}else{
+			video_bw=get_remaining_bandwidth_for_video(maxbw,lc->audio_bw);
+		}
+		return video_bw;
+	}
+	return 0;
+}
+
+void linphone_core_update_allocated_audio_bandwidth_in_call(LinphoneCall *call, const PayloadType *pt, int maxbw){
+	call->audio_bw=get_audio_payload_bandwidth(call->core,pt,maxbw);
 	ms_message("Audio bandwidth for this call is %i",call->audio_bw);
 }
 
 void linphone_core_update_allocated_audio_bandwidth(LinphoneCore *lc){
 	const MSList *elem;
-	PayloadType *max=NULL;
+	int maxbw=get_min_bandwidth(linphone_core_get_download_bandwidth(lc),
+					linphone_core_get_upload_bandwidth(lc));
+	int max_codec_bitrate=0;
+	
 	for(elem=linphone_core_get_audio_codecs(lc);elem!=NULL;elem=elem->next){
 		PayloadType *pt=(PayloadType*)elem->data;
 		if (payload_type_enabled(pt)){
-			int pt_bitrate=get_codec_bitrate(lc,pt);
-			if (max==NULL) max=pt;
-			else if (max->normal_bitrate<pt_bitrate){
-				max=pt;
+			int pt_bitrate=get_audio_payload_bandwidth(lc,pt,maxbw);
+			if (max_codec_bitrate==0) {
+				max_codec_bitrate=pt_bitrate;
+			}else if (max_codec_bitrate<pt_bitrate){
+				max_codec_bitrate=pt_bitrate;
 			}
 		}
 	}
-	if (max) {
-		lc->audio_bw=(int)(get_audio_payload_bandwidth(lc,max)/1000.0);
+	if (max_codec_bitrate) {
+		lc->audio_bw=max_codec_bitrate;
 	}
 }
 
-bool_t linphone_core_is_payload_type_usable_for_bandwidth(LinphoneCore *lc, PayloadType *pt,  int bandwidth_limit)
+bool_t linphone_core_is_payload_type_usable_for_bandwidth(LinphoneCore *lc, const PayloadType *pt,  int bandwidth_limit)
 {
 	double codec_band;
 	bool_t ret=FALSE;
@@ -166,14 +234,8 @@ bool_t linphone_core_is_payload_type_usable_for_bandwidth(LinphoneCore *lc, Payl
 	switch (pt->type){
 		case PAYLOAD_AUDIO_CONTINUOUS:
 		case PAYLOAD_AUDIO_PACKETIZED:
-			codec_band=get_audio_payload_bandwidth(lc,pt);
+			codec_band=get_audio_payload_bandwidth(lc,pt,bandwidth_limit);
 			ret=bandwidth_is_greater(bandwidth_limit*1000,codec_band);
-			/*hack to avoid using uwb codecs when having low bitrate and video*/
-			if (bandwidth_is_greater(199,bandwidth_limit)){
-				if (linphone_core_video_enabled(lc) && pt->clock_rate>16000){
-					ret=FALSE;
-				}
-			}
 			//ms_message("Payload %s: %g",pt->mime_type,codec_band);
 			break;
 		case PAYLOAD_VIDEO:
@@ -187,43 +249,8 @@ bool_t linphone_core_is_payload_type_usable_for_bandwidth(LinphoneCore *lc, Payl
 }
 
 /* return TRUE if codec can be used with bandwidth, FALSE else*/
-bool_t linphone_core_check_payload_type_usability(LinphoneCore *lc, PayloadType *pt)
-{
-	double codec_band;
-	int allowed_bw,video_bw;
-	bool_t ret=FALSE;
-
-	linphone_core_update_allocated_audio_bandwidth(lc);
-	allowed_bw=get_min_bandwidth(linphone_core_get_download_bandwidth(lc),
-					linphone_core_get_upload_bandwidth(lc));
-	if (allowed_bw==0) {
-		allowed_bw=-1;
-		video_bw=1500; /*around 1.5 Mbit/s*/
-	}else
-		video_bw=get_video_bandwidth(allowed_bw,lc->audio_bw);
-
-	switch (pt->type){
-		case PAYLOAD_AUDIO_CONTINUOUS:
-		case PAYLOAD_AUDIO_PACKETIZED:
-			codec_band=get_audio_payload_bandwidth(lc,pt);
-			ret=bandwidth_is_greater(allowed_bw*1000,codec_band);
-			/*hack to avoid using uwb codecs when having low bitrate and video*/
-			if (bandwidth_is_greater(199,allowed_bw)){
-				if (linphone_core_video_enabled(lc) && pt->clock_rate>16000){
-					ret=FALSE;
-				}
-			}
-			//ms_message("Payload %s: %g",pt->mime_type,codec_band);
-			break;
-		case PAYLOAD_VIDEO:
-			if (video_bw>0){
-				pt->normal_bitrate=video_bw*1000;
-				ret=TRUE;
-			}
-			else ret=FALSE;
-			break;
-	}
-	return ret;
+bool_t linphone_core_check_payload_type_usability(LinphoneCore *lc, const PayloadType *pt){
+	return linphone_core_is_payload_type_usable_for_bandwidth(lc, pt, linphone_core_get_payload_type_bitrate(lc,pt));
 }
 
 bool_t lp_spawn_command_line_sync(const char *command, char **result,int *command_ret){
@@ -684,11 +711,11 @@ void linphone_core_update_local_media_description_from_ice(SalMediaDescription *
 	}
 	strncpy(desc->ice_pwd, ice_session_local_pwd(session), sizeof(desc->ice_pwd));
 	strncpy(desc->ice_ufrag, ice_session_local_ufrag(session), sizeof(desc->ice_ufrag));
-	for (i = 0; i < desc->n_active_streams; i++) {
+	for (i = 0; i < desc->nb_streams; i++) {
 		SalStreamDescription *stream = &desc->streams[i];
 		IceCheckList *cl = ice_session_check_list(session, i);
 		nb_candidates = 0;
-		if (cl == NULL) continue;
+		if (!sal_stream_description_active(stream) || (cl == NULL)) continue;
 		if (ice_check_list_state(cl) == ICL_Completed) {
 			stream->ice_completed = TRUE;
 			result = ice_check_list_selected_valid_local_candidate(ice_session_check_list(session, i), &rtp_addr, &stream->rtp_port, &rtcp_addr, &stream->rtcp_port);
@@ -776,6 +803,13 @@ static void get_default_addr_and_port(uint16_t componentID, const SalMediaDescri
 	if ((*addr)[0] == '\0') *addr = md->addr;
 }
 
+static void clear_ice_check_list(LinphoneCall *call, IceCheckList *removed){
+	if (call->audiostream && call->audiostream->ms.ice_check_list==removed)
+		call->audiostream->ms.ice_check_list=NULL;
+	if (call->videostream && call->videostream->ms.ice_check_list==removed)
+		call->videostream->ms.ice_check_list=NULL;
+}
+
 void linphone_core_update_ice_from_remote_media_description(LinphoneCall *call, const SalMediaDescription *md)
 {
 	bool_t ice_restarted = FALSE;
@@ -788,7 +822,7 @@ void linphone_core_update_ice_from_remote_media_description(LinphoneCall *call, 
 			ice_session_restart(call->ice_session);
 			ice_restarted = TRUE;
 		} else {
-			for (i = 0; i < md->n_total_streams; i++) {
+			for (i = 0; i < md->nb_streams; i++) {
 				const SalStreamDescription *stream = &md->streams[i];
 				IceCheckList *cl = ice_session_check_list(call->ice_session, i);
 				if (cl && (strcmp(stream->rtp_addr, "0.0.0.0") == 0)) {
@@ -807,7 +841,7 @@ void linphone_core_update_ice_from_remote_media_description(LinphoneCall *call, 
 			}
 			ice_session_set_remote_credentials(call->ice_session, md->ice_ufrag, md->ice_pwd);
 		}
-		for (i = 0; i < md->n_total_streams; i++) {
+		for (i = 0; i < md->nb_streams; i++) {
 			const SalStreamDescription *stream = &md->streams[i];
 			IceCheckList *cl = ice_session_check_list(call->ice_session, i);
 			if (cl && (stream->ice_pwd[0] != '\0') && (stream->ice_ufrag[0] != '\0')) {
@@ -823,9 +857,10 @@ void linphone_core_update_ice_from_remote_media_description(LinphoneCall *call, 
 		}
 
 		/* Create ICE check lists if needed and parse ICE attributes. */
-		for (i = 0; i < md->n_total_streams; i++) {
+		for (i = 0; i < md->nb_streams; i++) {
 			const SalStreamDescription *stream = &md->streams[i];
 			IceCheckList *cl = ice_session_check_list(call->ice_session, i);
+			/*
 			if ((cl == NULL) && (i < md->n_active_streams)) {
 				cl = ice_check_list_new();
 				ice_session_add_check_list(call->ice_session, cl);
@@ -840,16 +875,13 @@ void linphone_core_update_ice_from_remote_media_description(LinphoneCall *call, 
 						break;
 				}
 			}
+			*/
+			if (cl==NULL) continue;
 			if (stream->ice_mismatch == TRUE) {
 				ice_check_list_set_state(cl, ICL_Failed);
 			} else if (stream->rtp_port == 0) {
 				ice_session_remove_check_list(call->ice_session, cl);
-#ifdef VIDEO_ENABLED
-				if (stream->type==SalVideo && call->videostream){
-					video_stream_stop(call->videostream);
-					call->videostream=NULL;
-				}
-#endif
+				clear_ice_check_list(call,cl);
 			} else {
 				if ((stream->ice_pwd[0] != '\0') && (stream->ice_ufrag[0] != '\0'))
 					ice_check_list_set_remote_credentials(cl, stream->ice_ufrag, stream->ice_pwd);
@@ -886,13 +918,12 @@ void linphone_core_update_ice_from_remote_media_description(LinphoneCall *call, 
 				}
 			}
 		}
-		for (i = ice_session_nb_check_lists(call->ice_session); i > md->n_active_streams; i--) {
-			IceCheckList *removed=ice_session_check_list(call->ice_session, i - 1);
-			ice_session_remove_check_list(call->ice_session, removed);
-			if (call->audiostream && call->audiostream->ms.ice_check_list==removed)
-				call->audiostream->ms.ice_check_list=NULL;
-			if (call->videostream && call->videostream->ms.ice_check_list==removed)
-				call->videostream->ms.ice_check_list=NULL;
+		for (i = 0; i < md->nb_streams; i++) {
+			IceCheckList * cl = ice_session_check_list(call->ice_session, i);
+			if (!sal_stream_description_active(&md->streams[i]) && (cl != NULL)) {
+				ice_session_remove_check_list_from_idx(call->ice_session, i);
+				clear_ice_check_list(call, cl);
+			}
 		}
 		ice_session_check_mismatch(call->ice_session);
 	} else {
@@ -905,12 +936,11 @@ void linphone_core_update_ice_from_remote_media_description(LinphoneCall *call, 
 	}
 }
 
-bool_t linphone_core_media_description_contains_video_stream(const SalMediaDescription *md)
-{
+bool_t linphone_core_media_description_contains_video_stream(const SalMediaDescription *md){
 	int i;
 
-	for (i = 0; i < md->n_active_streams; i++) {
-		if (md->streams[i].type == SalVideo)
+	for (i = 0; i < md->nb_streams; i++) {
+		if (md->streams[i].type == SalVideo && md->streams[i].rtp_port!=0)
 			return TRUE;
 	}
 	return FALSE;
@@ -973,12 +1003,12 @@ bool_t linphone_core_tone_indications_enabled(LinphoneCore*lc){
 #ifdef HAVE_GETIFADDRS
 
 #include <ifaddrs.h>
-static int get_local_ip_with_getifaddrs(int type, char *address, int size)
-{
+static int get_local_ip_with_getifaddrs(int type, char *address, int size){
 	struct ifaddrs *ifp;
 	struct ifaddrs *ifpstart;
-	int ret = 0;
-
+	char retaddr[LINPHONE_IPADDR_SIZE]={0};
+	bool_t found=FALSE;
+	
 	if (getifaddrs(&ifpstart) < 0) {
 		return -1;
 	}
@@ -995,17 +1025,18 @@ static int get_local_ip_with_getifaddrs(int type, char *address, int size)
 			if(getnameinfo(ifp->ifa_addr,
 						(type == AF_INET6) ?
 						sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in),
-						address, size, NULL, 0, NI_NUMERICHOST) == 0) {
-				if (strchr(address, '%') == NULL) {	/*avoid ipv6 link-local addresses */
+						retaddr, size, NULL, 0, NI_NUMERICHOST) == 0) {
+				if (strchr(retaddr, '%') == NULL) {	/*avoid ipv6 link-local addresses */
 					/*ms_message("getifaddrs() found %s",address);*/
-					ret++;
+					found=TRUE;
 					break;
 				}
 			}
 		}
 	}
 	freeifaddrs(ifpstart);
-	return ret;
+	if (found) strncpy(address,retaddr,size);
+	return found;
 }
 #endif
 
@@ -1067,7 +1098,7 @@ static int get_local_ip_for_with_connect(int type, const char *dest, char *resul
 		ms_error("getnameinfo error: %s",strerror(errno));
 	}
 	/*avoid ipv6 link-local addresses*/
-	if (type==AF_INET6 && strchr(result,'%')!=NULL){
+	if (p_addr->sa_family==AF_INET6 && strchr(result,'%')!=NULL){
 		strcpy(result,"::1");
 		close_socket(sock);
 		return -1;
@@ -1441,5 +1472,73 @@ void linphone_core_set_call_error_tone(LinphoneCore *lc, LinphoneReason reason, 
 **/
 void linphone_core_set_tone(LinphoneCore *lc, LinphoneToneID id, const char *audiofile){
 	_linphone_core_set_tone(lc, LinphoneReasonNone, id, audiofile);
+}
+
+const MSCryptoSuite * linphone_core_get_srtp_crypto_suites(LinphoneCore *lc){
+	const char *config=lp_config_get_string(lc->config,"sip","srtp_crypto_suites","AES_CM_128_HMAC_SHA1_80, AES_CM_128_HMAC_SHA1_32");
+	char *tmp=ms_strdup(config);
+	char *sep;
+	char *pos;
+	char *nextpos;
+	char *params;
+	int found=0;
+	MSCryptoSuite *result=NULL;
+	pos=tmp;
+	do{
+		sep=strchr(pos,',');
+		if (!sep) {
+			sep=pos+strlen(pos);
+			nextpos=NULL;
+		}else {
+			*sep='\0';
+			nextpos=sep+1;
+		}
+		while(*pos==' ') ++pos; /*strip leading spaces*/
+		params=strchr(pos,' '); /*look for params that arrive after crypto suite name*/
+		if (params){
+			while(*params==' ') ++params; /*strip parameters leading space*/
+		}
+		if (sep-pos>0){
+			MSCryptoSuiteNameParams np;
+			MSCryptoSuite suite;
+			np.name=pos;
+			np.params=params;
+			suite=ms_crypto_suite_build_from_name_params(&np);
+			if (suite!=MS_CRYPTO_SUITE_INVALID){
+				result=ms_realloc(result,(found+2)*sizeof(MSCryptoSuite));
+				result[found]=suite;
+				result[found+1]=MS_CRYPTO_SUITE_INVALID;
+				found++;
+				ms_message("Configured srtp crypto suite: %s %s",np.name,np.params ? np.params : "");
+			}
+		}
+		pos=nextpos;
+	}while(pos);
+	ms_free(tmp);
+	if (lc->rtp_conf.srtp_suites){
+		ms_free(lc->rtp_conf.srtp_suites);
+		lc->rtp_conf.srtp_suites=NULL;
+	}
+	lc->rtp_conf.srtp_suites=result;
+	return result;
+}
+
+
+
+const char ** linphone_core_get_supported_file_formats(LinphoneCore *core){
+	static const char *mkv="mkv";
+	static const char *wav="wav";
+	if (core->supported_formats==NULL){
+		core->supported_formats=ms_malloc0(3*sizeof(char*));
+		core->supported_formats[0]=wav;
+        if (ms_factory_lookup_filter_by_id(ms_factory_get_fallback(),MS_MKV_RECORDER_ID)){
+			core->supported_formats[1]=mkv;
+		}
+	}
+	return core->supported_formats;
+}
+
+bool_t linphone_core_symmetric_rtp_enabled(LinphoneCore*lc){
+	return lp_config_get_int(lc->config,"rtp","symmetric",1);
 }
 

@@ -18,11 +18,7 @@ CLEANFILES=$(GITVERSION_FILE)
 ## Process this file with automake to produce Makefile.in
 linphone_includedir=$(includedir)/linphone
 
-linphone_include_HEADERS=linphonecore.h linphonefriend.h linphonepresence.h linphonecore_utils.h lpconfig.h sipsetup.h event.h xml2lpc.h lpc2xml.h
-
-if BUILD_TUNNEL
-linphone_include_HEADERS+=linphone_tunnel.h
-endif
+linphone_include_HEADERS=linphonecore.h linphonefriend.h linphonepresence.h linphonecore_utils.h lpconfig.h sipsetup.h event.h xml2lpc.h lpc2xml.h linphone_tunnel.h
 
 lib_LTLIBRARIES=liblinphone.la
 
@@ -82,9 +78,9 @@ endif
 
 liblinphone_la_SOURCES+=linphone_tunnel_config.c
 if BUILD_TUNNEL
-liblinphone_la_SOURCES+=linphone_tunnel.cc TunnelManager.cc TunnelManager.hh 
+liblinphone_la_SOURCES+=linphone_tunnel.cc TunnelManager.cc TunnelManager.hh linphone_tunnel.h
 else
-liblinphone_la_SOURCES+=linphone_tunnel_stubs.c
+liblinphone_la_SOURCES+=linphone_tunnel_stubs.c linphone_tunnel.h
 endif
 
 
@@ -95,7 +91,7 @@ if HAVE_LD_OUTPUT_DEF
 liblinphone_la_LDFLAGS += -Wl,--output-def,liblinphone-$(LIBLINPHONE_SO_CURRENT).def
 defexecdir = $(libdir)
 defexec_DATA = liblinphone-$(LIBLINPHONE_SO_CURRENT).def
-CLEANFILES = $(defexec_DATA)
+CLEANFILES += $(defexec_DATA)
 
 liblinphone-$(LIBLINPHONE_SO_CURRENT).def: liblinphone.la
 
@@ -159,6 +155,10 @@ endif
 AM_CFLAGS+= -DUSE_BELLESIP
 
 AM_CXXFLAGS=$(AM_CFLAGS)
+
+#Make sure that we are in linphone's git tree by doing git log $(top_srcdir)/configure.ac.
+#if it is something known to git, then that will be ok to check the git describe number and make sure it is consistent with 
+#the PACKAGE_VERSION given in configure.ac
 
 make_gitversion_h:
 if !SKIP_GITCHECK
