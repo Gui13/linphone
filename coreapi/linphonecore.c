@@ -64,6 +64,7 @@ static const char *liblinphone_version=
 	LIBLINPHONE_VERSION
 #endif
 ;
+static bool_t liblinphone_serialize_logs = FALSE;
 static void set_network_reachable(LinphoneCore* lc,bool_t isReachable, time_t curtime);
 static void linphone_core_run_hooks(LinphoneCore *lc);
 static void linphone_core_free_hooks(LinphoneCore *lc);
@@ -480,9 +481,13 @@ void linphone_core_enable_logs_with_cb(OrtpLogFunc logfunc){
  * @ingroup misc
  * @deprecated Use #linphone_core_set_log_level instead.
 **/
-void linphone_core_disable_logs(){
+void linphone_core_disable_logs(void){
 	ortp_set_log_level_mask(ORTP_ERROR|ORTP_FATAL);
 	sal_disable_logs();
+}
+
+void linphone_core_serialize_logs(void) {
+	liblinphone_serialize_logs = TRUE;
 }
 
 
@@ -1331,6 +1336,9 @@ static void linphone_core_init(LinphoneCore * lc, const LinphoneCoreVTable *vtab
 
 	linphone_core_set_state(lc,LinphoneGlobalStartup,"Starting up");
 	ortp_init();
+	if (liblinphone_serialize_logs == TRUE) {
+		ortp_set_log_thread_id(ortp_thread_self());
+	}
 	lc->dyn_pt=96;
 	lc->default_profile=rtp_profile_new("default profile");
 	linphone_core_assign_payload_type(lc,&payload_type_pcmu8000,0,NULL);
@@ -2351,7 +2359,7 @@ void linphone_core_iterate(LinphoneCore *lc){
 #endif //BUILD_UPNP
 			linphone_core_start_invite(lc,call, NULL);
 		}
-		if (call->state==LinphoneCallIncomingReceived){
+		if (call->state==LinphoneCallIncomingReceived || call->state==LinphoneCallIncomingEarlyMedia){
 			if (one_second_elapsed) ms_message("incoming call ringing for %i seconds",elapsed);
 			if (elapsed>lc->sip_conf.inc_timeout){
 				LinphoneReason decline_reason;
@@ -2394,6 +2402,10 @@ void linphone_core_iterate(LinphoneCore *lc){
 		if (lp_config_needs_commit(lc->config)) {
 			lp_config_sync(lc->config);
 		}
+	}
+
+	if (liblinphone_serialize_logs == TRUE) {
+		ortp_logv_flush();
 	}
 }
 
@@ -2824,6 +2836,7 @@ void linphone_configure_op(LinphoneCore *lc, SalOp *op, const LinphoneAddress *d
 	sal_op_set_to_address(op,dest);
 	sal_op_set_from(op,identity);
 	sal_op_set_sent_custom_header(op,headers);
+	sal_op_set_realm(op,linphone_proxy_config_get_realm(proxy));
 	if (with_contact && proxy && proxy->op){
 		const SalAddress *contact;
 		if ((contact=sal_op_get_contact_address(proxy->op))){
@@ -6034,6 +6047,9 @@ static void linphone_core_uninit(LinphoneCore *lc)
 	linphone_core_message_storage_close(lc);
 	ms_exit();
 	linphone_core_set_state(lc,LinphoneGlobalOff,"Off");
+	if (liblinphone_serialize_logs == TRUE) {
+		ortp_set_log_thread_id(0);
+	}
 }
 
 static void set_network_reachable(LinphoneCore* lc,bool_t isReachable, time_t curtime){

@@ -1287,6 +1287,20 @@ extern "C" jint Java_org_linphone_core_LinphoneCoreImpl_getPayloadTypeBitrate(JN
 	return (jint)linphone_core_get_payload_type_bitrate((LinphoneCore*)lc,(PayloadType*)pt);
 }
 
+extern "C" void Java_org_linphone_core_LinphoneCoreImpl_enableAdaptiveRateControl(JNIEnv*  env
+																			,jobject  thiz
+																			,jlong lc
+																			,jboolean enable) {
+	linphone_core_enable_adaptive_rate_control((LinphoneCore*)lc, enable);
+}
+
+extern "C" jboolean Java_org_linphone_core_LinphoneCoreImpl_isAdaptiveRateControlEnabled(JNIEnv*  env
+																			,jobject  thiz
+																			,jlong lc
+																			) {
+	return (jboolean)linphone_core_adaptive_rate_control_enabled((LinphoneCore*)lc);
+}
+
 extern "C" void Java_org_linphone_core_LinphoneCoreImpl_enableEchoCancellation(JNIEnv*  env
 																			,jobject  thiz
 																			,jlong lc
@@ -3030,6 +3044,19 @@ JNIEXPORT void JNICALL Java_org_linphone_core_LinphoneProxyConfigImpl_setQuality
 
 JNIEXPORT jstring JNICALL Java_org_linphone_core_LinphoneProxyConfigImpl_getQualityReportingCollector(JNIEnv *env, jobject thiz, jlong ptr) {
 	jstring jvalue = env->NewStringUTF(linphone_proxy_config_get_quality_reporting_collector((LinphoneProxyConfig *)ptr));
+	return jvalue;
+}
+
+JNIEXPORT void JNICALL Java_org_linphone_core_LinphoneProxyConfigImpl_setRealm(JNIEnv *env, jobject thiz, jlong ptr, jstring jrealm) {
+	if (jrealm){
+		const char *realm=env->GetStringUTFChars(jrealm, NULL);
+		linphone_proxy_config_set_realm((LinphoneProxyConfig *)ptr, realm);
+		env->ReleaseStringUTFChars(jrealm,realm);
+	}
+}
+
+JNIEXPORT jstring JNICALL Java_org_linphone_core_LinphoneProxyConfigImpl_getRealm(JNIEnv *env, jobject thiz, jlong ptr) {
+	jstring jvalue = env->NewStringUTF(linphone_proxy_config_get_realm((LinphoneProxyConfig *)ptr));
 	return jvalue;
 }
 

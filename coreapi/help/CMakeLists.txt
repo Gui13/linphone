@@ -20,13 +20,18 @@
 #
 ############################################################################
 
-install(FILES archived-rootca.pem
-		RENAME rootca.pem
-        DESTINATION share/linphone
-        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+find_package(Doxygen)
 
-install(FILES ringback.wav
-        DESTINATION share/sounds/linphone
-        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
-
-add_subdirectory(rings)
+if(DOXYGEN_FOUND)
+	if(DOXYGEN_DOT_FOUND)
+		set(top_srcdir ${CMAKE_SOURCE_DIR})
+		configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+		add_custom_target(doc ALL
+			${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+			DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+		install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/doc/html" "${CMAKE_CURRENT_BINARY_DIR}/doc/xml"
+			DESTINATION "${CMAKE_INSTALL_PREFIX}/share/doc/linphone-${LINPHONE_VERSION}")
+	else()
+		message(WARNING "The dot program is needed to generate the linphone documentation. You can get it from http://www.graphviz.org/.")
+	endif()
+endif()
