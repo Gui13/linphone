@@ -1,3 +1,13 @@
+static void pylinphone_dispatch_messages(void) {
+#ifdef WIN32
+	MSG msg;
+	while (PeekMessage(&msg, NULL, 0, 0, 1)) {
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+	}
+#endif
+}
+
 static void pylinphone_log(const char *level, int indent, const char *fmt, va_list args) {
 	static int current_indent = 1;
 	PyObject *linphone_module;
@@ -7,7 +17,7 @@ static void pylinphone_log(const char *level, int indent, const char *fmt, va_li
 	linphone_module = PyImport_ImportModule("linphone");
 	if ((linphone_module != NULL) && PyObject_HasAttrString(linphone_module, "__log_handler")) {
 		PyObject *log_handler = PyObject_GetAttrString(linphone_module, "__log_handler");
-		if ((log_handler != NULL) && PyFunction_Check(log_handler)) {
+		if ((log_handler != NULL) && PyCallable_Check(log_handler)) {
 			char logstr[4096];
 			int i = 0;
 			if (indent == -1) current_indent--;
@@ -19,7 +29,9 @@ static void pylinphone_log(const char *level, int indent, const char *fmt, va_li
 			}
 			if (indent == 1) current_indent++;
 			if (vsnprintf(logstr + i, sizeof(logstr) - i, fmt, args) > 0) {
-				PyEval_CallFunction(log_handler, "ss", level, logstr);
+				if (PyEval_CallObject(log_handler, Py_BuildValue("ss", level, logstr)) == NULL) {
+					PyErr_Print();
+				}
 			}
 			Py_DECREF(log_handler);
 		}
@@ -63,10 +75,10 @@ static void pylinphone_module_log_handler(OrtpLogLevel lev, const char *fmt, va_
 	level = pylinphone_ortp_log_level_to_string(lev);
 	if ((linphone_module != NULL) && PyObject_HasAttrString(linphone_module, "__log_handler")) {
 		PyObject *log_handler = PyObject_GetAttrString(linphone_module, "__log_handler");
-		if ((log_handler != NULL) && PyFunction_Check(log_handler)) {
+		if ((log_handler != NULL) && PyCallable_Check(log_handler)) {
 			char logstr[4096];
 			if (vsnprintf(logstr, sizeof(logstr), fmt, args) > 0) {
-				if (PyEval_CallFunction(log_handler, "ss", level, logstr) == NULL) {
+				if (PyEval_CallObject(log_handler, Py_BuildValue("ss", level, logstr)) == NULL) {
 					PyErr_Print();
 				}
 			}
@@ -88,6 +100,10 @@ static PyObject * pylinphone_module_method_set_log_handler(PyObject *self, PyObj
 	PyObject *linphone_module = PyImport_ImportModule("linphone");
 	PyObject *callback;
 	if (!PyArg_ParseTuple(args, "O", &callback)) {
+		return NULL;
+	}
+	if (!PyCallable_Check(callback)) {
+		PyErr_SetString(PyExc_TypeError, "The argument must be a callable");
 		return NULL;
 	}
 	if (linphone_module != NULL) {
@@ -176,27 +192,4 @@ static PyObject * pylinphone_Core_class_method_new_with_config(PyObject *cls, Py
 	pylinphone_trace(-1, "[PYLINPHONE] <<< %s -> %p", __FUNCTION__, pyret);
 	Py_DECREF(self);
 	return pyret;
-}
-
-static PyObject * pylinphone_Core_instance_method_iterate(PyObject *self, PyObject *args) {
-	LinphoneCore *native_ptr = pylinphone_Core_get_native_ptr(self);
-	if (native_ptr == NULL) {
-		PyErr_SetString(PyExc_TypeError, "Invalid linphone.Core instance");
-		return NULL;
-	}
-
-	pylinphone_trace(1, "[PYLINPHONE] >>> %s(%p [%p])", __FUNCTION__, self, native_ptr);
-	linphone_core_iterate(native_ptr);
-#ifdef WIN32
-	{
-		MSG msg;
-		while (PeekMessage(&msg, NULL, 0, 0, 1)) {
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		}
-	}
-#endif
-
-	pylinphone_trace(-1, "[PYLINPHONE] <<< %s -> None", __FUNCTION__);
-	Py_RETURN_NONE;
 }
