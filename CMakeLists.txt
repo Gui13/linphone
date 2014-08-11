@@ -79,10 +79,14 @@ endif()
 
 
 if(ENABLE_RELATIVE_PREFIX)
-	set(LINPHONE_PLUGINS_DIR "./lib/liblinphone/plugins")
+	set(LINPHONE_DATA_DIR ".")
 else()
-	set(LINPHONE_PLUGINS_DIR "${CMAKE_INSTALL_PREFIX}/lib/liblinphone/plugins")
+	set(LINPHONE_DATA_DIR "${CMAKE_INSTALL_PREFIX}")
 endif()
+set(LINPHONE_PLUGINS_DIR "${LINPHONE_DATA_DIR}/lib/liblinphone/plugins")
+set(PACKAGE_LOCALE_DIR "${LINPHONE_DATA_DIR}/share/locale")
+set(PACKAGE_DATA_DIR "${LINPHONE_DATA_DIR}/share")
+set(PACKAGE_SOUND_DIR "${LINPHONE_DATA_DIR}/share/sounds/linphone")
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/config.h PROPERTIES GENERATED ON)
 add_definitions(-DHAVE_CONFIG_H)
@@ -90,3 +94,9 @@ add_definitions(-DHAVE_CONFIG_H)
 
 add_subdirectory(coreapi)
 add_subdirectory(share)
+
+
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/FindLinphone.cmake
+	DESTINATION share/cmake/Modules
+	PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+)
