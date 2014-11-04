@@ -25,6 +25,7 @@ import java.io.IOException;
 
 import org.linphone.core.LinphoneCall.State;
 import org.linphone.mediastream.Log;
+import org.linphone.mediastream.video.AndroidVideoWindowImpl;
 import org.linphone.mediastream.video.capture.hwconf.Hacks;
 
 import android.content.Context;
@@ -34,19 +35,19 @@ import android.media.AudioManager;
 class LinphoneCoreImpl implements LinphoneCore {
 
 	private final  LinphoneCoreListener mListener; //to make sure to keep a reference on this object
-	private long nativePtr = 0;
+	protected long nativePtr = 0;
 	private Context mContext = null;
 	private AudioManager mAudioManager = null;
 	private boolean mSpeakerEnabled = false;
 	private native long newLinphoneCore(LinphoneCoreListener listener,String userConfig,String factoryConfig,Object  userdata);
 	private native void iterate(long nativePtr);
-	private native long getDefaultProxyConfig(long nativePtr);
+	private native LinphoneProxyConfig getDefaultProxyConfig(long nativePtr);
 
 	private native void setDefaultProxyConfig(long nativePtr,long proxyCfgNativePtr);
 	private native int addProxyConfig(LinphoneProxyConfig jprtoxyCfg,long nativePtr,long proxyCfgNativePtr);
 	private native void removeProxyConfig(long nativePtr, long proxyCfg);
 	private native void clearAuthInfos(long nativePtr);
-	
+
 	private native void clearProxyConfigs(long nativePtr);
 	private native void addAuthInfo(long nativePtr,long authInfoNativePtr);
 	private native void removeAuthInfo(long nativePtr, long authInfoNativePtr);
@@ -73,8 +74,11 @@ class LinphoneCoreImpl implements LinphoneCore {
 	private native long findPayloadType(long nativePtr, String mime, int clockRate, int channels);
 	private native int enablePayloadType(long nativePtr, long payloadType,	boolean enable);
 	private native boolean isPayloadTypeEnabled(long nativePtr, long payloadType);
+	private native boolean payloadTypeIsVbr(long nativePtr, long payloadType);
 	private native void enableAdaptiveRateControl(long nativePtr,boolean enable);
 	private native boolean isAdaptiveRateControlEnabled(long nativePtr);
+	private native String getAdaptiveRateAlgorithm(long nativePtr);
+	private native void setAdaptiveRateAlgorithm(long nativePtr, String alg);
 	private native void enableEchoCancellation(long nativePtr,boolean enable);
 	private native boolean isEchoCancellationEnabled(long nativePtr);
 	private native Object getCurrentCall(long nativePtr) ;
@@ -147,12 +151,12 @@ class LinphoneCoreImpl implements LinphoneCore {
 	private native void setChatDatabasePath(long nativePtr, String path);
 	private native long[] getChatRooms(long nativePtr);
 	private native int migrateToMultiTransport(long nativePtr);
-	private native long createProxyConfig(long nativePtr);
 	private native void setCallErrorTone(long nativePtr, int reason, String path);
 	private native void enableSdp200Ack(long nativePtr,boolean enable);
 	private native boolean isSdp200AckEnabled(long nativePtr);
 	private native void stopRinging(long nativePtr);
-	
+	private native static void setAndroidPowerManager(Object pm);
+
 	LinphoneCoreImpl(LinphoneCoreListener listener, File userConfig, File factoryConfig, Object userdata) throws IOException {
 		mListener = listener;
 		String user = userConfig == null ? null : userConfig.getCanonicalPath();
@@ -163,9 +167,9 @@ class LinphoneCoreImpl implements LinphoneCore {
 		mListener = listener;
 		nativePtr = newLinphoneCore(listener,null,null,null);
 	}
-	
+
 	protected void finalize() throws Throwable {
-		
+		if (nativePtr!=0) destroy();
 	}
 
 	private boolean contextInitialized() {
@@ -178,6 +182,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public void setContext(Object context) {
 		mContext = (Context)context;
 		mAudioManager = (AudioManager) mContext.getSystemService(Context.AUDIO_SERVICE);
+		setAndroidPowerManager(mContext.getSystemService(Context.POWER_SERVICE));
 	}
 
 	public synchronized void addAuthInfo(LinphoneAuthInfo info) {
@@ -192,12 +197,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 
 	public synchronized LinphoneProxyConfig getDefaultProxyConfig() {
 		isValid();
-		long lNativePtr = getDefaultProxyConfig(nativePtr);	
-		if (lNativePtr!=0) {
-			return new LinphoneProxyConfigImpl(this,lNativePtr); 
-		} else {
-			return null;
-		}
+		return getDefaultProxyConfig(nativePtr);
 	}
 
 	public synchronized LinphoneCall invite(String uri) {
@@ -225,8 +225,6 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized void removeProxyConfig(LinphoneProxyConfig proxyCfg) {
 		isValid();
 		removeProxyConfig(nativePtr, ((LinphoneProxyConfigImpl)proxyCfg).nativePtr);
-		((LinphoneProxyConfigImpl)proxyCfg).mCore=null;
-		((LinphoneProxyConfigImpl)proxyCfg).deleteNativePtr();
 	}
 	public synchronized void clearAuthInfos() {
 		isValid();
@@ -263,18 +261,17 @@ class LinphoneCoreImpl implements LinphoneCore {
 	}
 	public synchronized LinphoneCallLog[] getCallLogs() {
 		isValid();
-		LinphoneCallLog[] logs = new LinphoneCallLog[getNumberOfCallLogs(nativePtr)]; 
+		LinphoneCallLog[] logs = new LinphoneCallLog[getNumberOfCallLogs(nativePtr)];
 		for (int i=0;i < getNumberOfCallLogs(nativePtr);i++) {
 			logs[i] = new LinphoneCallLogImpl(getCallLog(nativePtr, i));
 		}
 		return logs;
 	}
 	public synchronized void destroy() {
-		isValid();
 		delete(nativePtr);
-		nativePtr = 0;
+		nativePtr=0;
 	}
-	
+
 	private void isValid() {
 		if (nativePtr == 0) {
 			throw new RuntimeException("object already destroyed");
@@ -285,7 +282,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 	}
 	public synchronized void setPlaybackGain(float gain) {
 		setPlaybackGain(nativePtr,gain);
-		
+
 	}
 	public synchronized float getPlaybackGain() {
 		return getPlaybackGain(nativePtr);
@@ -302,7 +299,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 			throw new LinphoneCoreException("Cannot interpret ["+destination+"]");
 		}
 	}
-	public synchronized LinphoneCall invite(LinphoneAddress to) throws LinphoneCoreException { 
+	public synchronized LinphoneCall invite(LinphoneAddress to) throws LinphoneCoreException {
 		LinphoneCall call = (LinphoneCall)inviteAddress(nativePtr,((LinphoneAddressImpl)to).nativePtr);
 		if (call!=null) {
 			return call;
@@ -335,12 +332,18 @@ class LinphoneCoreImpl implements LinphoneCore {
 		if (enablePayloadType(nativePtr,((PayloadTypeImpl)pt).nativePtr,enable) != 0) {
 			throw new LinphoneCoreException("cannot enable payload type ["+pt+"]");
 		}
-		
+
 	}
 	public synchronized boolean isPayloadTypeEnabled(PayloadType pt) {
 		isValid();
 		return isPayloadTypeEnabled(nativePtr, ((PayloadTypeImpl)pt).nativePtr);
 	}
+
+	public synchronized boolean payloadTypeIsVbr(PayloadType pt) {
+		isValid();
+		return payloadTypeIsVbr(nativePtr, ((PayloadTypeImpl)pt).nativePtr);
+	}
+
 	public synchronized void enableEchoCancellation(boolean enable) {
 		isValid();
 		enableEchoCancellation(nativePtr, enable);
@@ -348,21 +351,21 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized boolean isEchoCancellationEnabled() {
 		isValid();
 		return isEchoCancellationEnabled(nativePtr);
-		
+
 	}
 
 	public synchronized LinphoneCall getCurrentCall() {
 		isValid();
 		return (LinphoneCall)getCurrentCall(nativePtr);
 	}
-	
+
 	public int getPlayLevel() {
 		// TODO Auto-generated method stub
 		return 0;
 	}
 	public void setPlayLevel(int level) {
 		// TODO Auto-generated method stub
-		
+
 	}
 
 	private void applyAudioHacks() {
@@ -398,20 +401,20 @@ class LinphoneCoreImpl implements LinphoneCore {
 	}
 	public synchronized void playDtmf(char number, int duration) {
 		playDtmf(nativePtr,number, duration);
-		
+
 	}
 	public synchronized void stopDtmf() {
 		stopDtmf(nativePtr);
 	}
-	
+
 	public synchronized void addFriend(LinphoneFriend lf) throws LinphoneCoreException {
 		addFriend(nativePtr,((LinphoneFriendImpl)lf).nativePtr);
-		
+
 	}
 	@SuppressWarnings("deprecation")
 	public synchronized void setPresenceInfo(int minutes_away, String alternative_contact, OnlineStatus status) {
 		setPresenceInfo(nativePtr,minutes_away,alternative_contact,status.mValue);
-		
+
 	}
 	@SuppressWarnings("deprecation")
 	public synchronized OnlineStatus getPresenceInfo() {
@@ -435,7 +438,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized void setDeviceRotation(int rotation) {
 		setDeviceRotation(nativePtr, rotation);
 	}
-	
+
 	public synchronized void enableVideo(boolean vcap_enabled, boolean display_enabled) {
 		enableVideo(nativePtr,vcap_enabled, display_enabled);
 	}
@@ -457,15 +460,15 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized void setStunServer(String stunServer) {
 		setStunServer(nativePtr,stunServer);
 	}
-	
+
 	public synchronized LinphoneCallParams createDefaultCallParameters() {
 		return new LinphoneCallParamsImpl(createDefaultCallParams(nativePtr));
 	}
-	
+
 	public synchronized LinphoneCall inviteAddressWithParams(LinphoneAddress to, LinphoneCallParams params) throws LinphoneCoreException {
 		long ptrDestination = ((LinphoneAddressImpl)to).nativePtr;
 		long ptrParams =((LinphoneCallParamsImpl)params).nativePtr;
-		
+
 		LinphoneCall call = (LinphoneCall)inviteAddressWithParams(nativePtr, ptrDestination, ptrParams);
 		if (call!=null) {
 			return call;
@@ -510,19 +513,19 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized String getRing() {
 		return getRing(nativePtr);
 	}
-	
+
 	public synchronized void setRootCA(String path) {
 		setRootCA(nativePtr, path);
 	}
-	
-	public synchronized LinphoneProxyConfig[] getProxyConfigList() { 
+
+	public synchronized LinphoneProxyConfig[] getProxyConfigList() {
 		return getProxyConfigList(nativePtr);
 	}
-	
+
 	public synchronized PayloadType[] getVideoCodecs() {
 		long[] typesPtr = listVideoPayloadTypes(nativePtr);
 		if (typesPtr == null) return null;
-		
+
 		PayloadType[] codecs = new PayloadType[typesPtr.length];
 
 		for (int i=0; i < codecs.length; i++) {
@@ -534,7 +537,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized PayloadType[] getAudioCodecs() {
 		long[] typesPtr = listAudioPayloadTypes(nativePtr);
 		if (typesPtr == null) return null;
-		
+
 		PayloadType[] codecs = new PayloadType[typesPtr.length];
 
 		for (int i=0; i < codecs.length; i++) {
@@ -546,10 +549,10 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized boolean isNetworkReachable() {
 		return isNetworkStateReachable(nativePtr);
 	}
-	
+
 	public synchronized void enableKeepAlive(boolean enable) {
 		enableKeepAlive(nativePtr,enable);
-		
+
 	}
 	public synchronized boolean isKeepAliveEnabled() {
 		return isKeepAliveEnabled(nativePtr);
@@ -557,7 +560,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized void startEchoCalibration(Object data) throws LinphoneCoreException {
 		startEchoCalibration(nativePtr, data);
 	}
-	
+
 	public synchronized Transports getSignalingTransportPorts() {
 		Transports transports = new Transports();
 		transports.udp = getSignalingTransportPort(nativePtr, 0);
@@ -592,7 +595,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 	}
 	public synchronized void setDownloadPtime(int ptime) {
 		setDownloadPtime(nativePtr,ptime);
-		
+
 	}
 	public synchronized void setUploadPtime(int ptime) {
 		setUploadPtime(nativePtr,ptime);
@@ -615,12 +618,12 @@ class LinphoneCoreImpl implements LinphoneCore {
 	}
 
 
-	private native void leaveConference(long nativePtr);	
+	private native void leaveConference(long nativePtr);
 	public synchronized void leaveConference() {
 		leaveConference(nativePtr);
 	}
 
-	private native boolean enterConference(long nativePtr);	
+	private native boolean enterConference(long nativePtr);
 	public synchronized boolean enterConference() {
 		return enterConference(nativePtr);
 	}
@@ -658,12 +661,12 @@ class LinphoneCoreImpl implements LinphoneCore {
 	private native void addAllToConference(long nativePtr);
 	public synchronized void addAllToConference() {
 		addAllToConference(nativePtr);
-		
+
 	}
 	private native void addToConference(long nativePtr, long nativePtrLcall);
 	public synchronized void addToConference(LinphoneCall call) {
 		addToConference(nativePtr, getCallPtr(call));
-		
+
 	}
 	private native void removeFromConference(long nativePtr, long nativeCallPtr);
 	public synchronized void removeFromConference(LinphoneCall call) {
@@ -673,7 +676,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 	private long getCallPtr(LinphoneCall call) {
 		return ((LinphoneCallImpl)call).nativePtr;
 	}
-	
+
 	private long getCallParamsPtr(LinphoneCallParams callParams) {
 		return ((LinphoneCallParamsImpl)callParams).nativePtr;
 	}
@@ -701,7 +704,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 		return isMediaEncryptionMandatory(nativePtr);
 	}
 	public synchronized void setMediaEncryption(MediaEncryption menc) {
-		setMediaEncryption(nativePtr, menc.mValue);	
+		setMediaEncryption(nativePtr, menc.mValue);
 	}
 	public synchronized void setMediaEncryptionMandatory(boolean yesno) {
 		setMediaEncryptionMandatory(nativePtr, yesno);
@@ -753,6 +756,18 @@ class LinphoneCoreImpl implements LinphoneCore {
 		tunnelAddServerAndMirror(nativePtr, host, port, mirror, ms);
 	}
 
+	private native void tunnelAddServer(long nativePtr, TunnelConfig config);
+	@Override
+	public synchronized void tunnelAddServer(TunnelConfig config) {
+		tunnelAddServer(nativePtr, config);
+	}
+
+	private native final TunnelConfig[] tunnelGetServers(long nativePtr);
+	@Override
+	public synchronized final TunnelConfig[] tunnelGetServers() {
+		return tunnelGetServers(nativePtr);
+	}
+
 	private native void tunnelAutoDetect(long nativePtr);
 	@Override
 	public synchronized void tunnelAutoDetect() {
@@ -770,10 +785,34 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized void tunnelEnable(boolean enable) {
 		tunnelEnable(nativePtr, enable);
 	}
+	
+	private native void tunnelSetMode(long nativePtr, int mode);
+	@Override
+	public synchronized void tunnelSetMode(LinphoneCore.TunnelMode mode) {
+		tunnelSetMode(nativePtr, TunnelMode.enumToInt(mode));
+	}
+	
+	private native int tunnelGetMode(long nativePtr);
+	@Override
+	public synchronized LinphoneCore.TunnelMode tunnelGetMode() {
+		return LinphoneCore.TunnelMode.intToEnum(tunnelGetMode(nativePtr));
+	}
+	
+	private native void tunnelEnableSip(long nativePtr, boolean enable);
+	@Override
+	public void tunnelEnableSip(boolean enable) {
+		tunnelEnableSip(nativePtr, enable);
+	}
+	
+	private native boolean tunnelSipEnabled(long nativePtr);
+	@Override
+	public boolean tunnelSipEnabled() {
+		return tunnelSipEnabled(nativePtr);
+	}
 
 	@Override
 	public native boolean isTunnelAvailable();
-	
+
 	private native void acceptCallWithParams(long nativePtr, long aCall,
 			long params);
 	@Override
@@ -781,14 +820,14 @@ class LinphoneCoreImpl implements LinphoneCore {
 			LinphoneCallParams params) throws LinphoneCoreException {
 		acceptCallWithParams(nativePtr, getCallPtr(aCall), getCallParamsPtr(params));
 	}
-	
+
 	private native void acceptCallUpdate(long nativePtr, long aCall, long params);
 	@Override
 	public synchronized void acceptCallUpdate(LinphoneCall aCall, LinphoneCallParams params)
 			throws LinphoneCoreException {
-		acceptCallUpdate(nativePtr, getCallPtr(aCall), getCallParamsPtr(params));		
+		acceptCallUpdate(nativePtr, getCallPtr(aCall), getCallParamsPtr(params));
 	}
-	
+
 	private native void deferCallUpdate(long nativePtr, long aCall);
 	@Override
 	public synchronized void deferCallUpdate(LinphoneCall aCall)
@@ -796,7 +835,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 		deferCallUpdate(nativePtr, getCallPtr(aCall));
 	}
 
-	
+
 	private native void setVideoPolicy(long nativePtr, boolean autoInitiate, boolean autoAccept);
 	public synchronized void setVideoPolicy(boolean autoInitiate, boolean autoAccept) {
 		setVideoPolicy(nativePtr, autoInitiate, autoAccept);
@@ -809,7 +848,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized boolean getVideoAutoAcceptPolicy() {
 		return getVideoAutoAcceptPolicy(nativePtr);
 	}
-	
+
 	private native void setStaticPicture(long nativePtr, String path);
 	public synchronized void setStaticPicture(String path) {
 		setStaticPicture(nativePtr, path);
@@ -825,11 +864,11 @@ class LinphoneCoreImpl implements LinphoneCore {
 	{
 		setCpuCountNative(count);
 	}
-	
+
 	public synchronized int getMissedCallsCount() {
 		return getMissedCallsCount(nativePtr);
 	}
-	
+
 	public synchronized void removeCallLog(LinphoneCallLog log) {
 		removeCallLog(nativePtr, ((LinphoneCallLogImpl) log).getNativePtr());
 	}
@@ -837,7 +876,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized void resetMissedCallsCount() {
 		resetMissedCallsCount(nativePtr);
 	}
-	
+
 	private native void tunnelSetHttpProxy(long nativePtr, String proxy_host, int port,
 			String username, String password);
 	@Override
@@ -845,12 +884,12 @@ class LinphoneCoreImpl implements LinphoneCore {
 			String username, String password) {
 		tunnelSetHttpProxy(nativePtr, proxy_host, port, username, password);
 	}
-	
+
 	private native void refreshRegisters(long nativePtr);
 	public synchronized void refreshRegisters() {
 		refreshRegisters(nativePtr);
 	}
-	
+
 	@Override
 	public String getVersion() {
 		return getVersion(nativePtr);
@@ -867,13 +906,13 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized PayloadType findPayloadType(String mime, int clockRate) {
 		return findPayloadType(mime, clockRate, FIND_PAYLOAD_IGNORE_CHANNELS);
 	}
-	
+
 	private native void removeFriend(long ptr, long lf);
 	@Override
 	public synchronized void removeFriend(LinphoneFriend lf) {
 		removeFriend(nativePtr, lf.getNativePtr());
 	}
-	
+
 	private native long getFriendByAddress(long ptr, String sipUri);
 	@Override
 	public synchronized LinphoneFriend findFriendByAddress(String sipUri) {
@@ -883,64 +922,64 @@ class LinphoneCoreImpl implements LinphoneCore {
 		}
 		return new LinphoneFriendImpl(ptr);
 	}
-	
+
 	public synchronized void setAudioPort(int port) {
 		setAudioPort(nativePtr, port);
 	}
-	
+
 	public synchronized void setVideoPort(int port) {
 		setVideoPort(nativePtr, port);
 	}
-	
+
 	public synchronized void setAudioPortRange(int minPort, int maxPort) {
 		setAudioPortRange(nativePtr, minPort, maxPort);
 	}
-	
+
 	public synchronized void setVideoPortRange(int minPort, int maxPort) {
 		setVideoPortRange(nativePtr, minPort, maxPort);
 	}
-	
+
 	public synchronized void setIncomingTimeout(int timeout) {
 		setIncomingTimeout(nativePtr, timeout);
 	}
-	
+
 	public synchronized void setInCallTimeout(int timeout)
 	{
 		setInCallTimeout(nativePtr, timeout);
 	}
-	
+
 	private native void setMicrophoneGain(long ptr, float gain);
 	public synchronized void setMicrophoneGain(float gain) {
 		setMicrophoneGain(nativePtr, gain);
 	}
-	
+
 	public synchronized void setPrimaryContact(String displayName, String username) {
 		setPrimaryContact(nativePtr, displayName, username);
 	}
-	
+
 	public synchronized String getPrimaryContactUsername() {
 		return getPrimaryContactUsername(nativePtr);
 	}
-	
+
 	public synchronized String getPrimaryContactDisplayName() {
 		return getPrimaryContactDisplayName(nativePtr);
 	}
-	
+
 	private native void setUseSipInfoForDtmfs(long ptr, boolean use);
 	public synchronized void setUseSipInfoForDtmfs(boolean use) {
 		setUseSipInfoForDtmfs(nativePtr, use);
 	}
-	
+
 	private native boolean getUseSipInfoForDtmfs(long ptr);
 	public synchronized boolean getUseSipInfoForDtmfs() {
 		return getUseSipInfoForDtmfs(nativePtr);
 	}
-	
+
 	private native void setUseRfc2833ForDtmfs(long ptr, boolean use);
 	public synchronized void setUseRfc2833ForDtmfs(boolean use) {
 		setUseRfc2833ForDtmfs(nativePtr, use);
 	}
-	
+
 	private native boolean getUseRfc2833ForDtmfs(long ptr);
 	public synchronized boolean getUseRfc2833ForDtmfs() {
 		return getUseRfc2833ForDtmfs(nativePtr);
@@ -961,17 +1000,17 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized void declineCall(LinphoneCall aCall, Reason reason) {
 		declineCall(nativePtr,((LinphoneCallImpl)aCall).nativePtr,reason.mValue);
 	}
-	
+
 	private native boolean upnpAvailable(long ptr);
 	public synchronized boolean upnpAvailable() {
 		return upnpAvailable(nativePtr);
-	} 
+	}
 
 	private native int getUpnpState(long ptr);
 	public synchronized UpnpState getUpnpState() {
-		return UpnpState.fromInt(getUpnpState(nativePtr));	
+		return UpnpState.fromInt(getUpnpState(nativePtr));
 	}
-	
+
 	private native String getUpnpExternalIpaddress(long ptr);
 	public synchronized String getUpnpExternalIpaddress() {
 		return getUpnpExternalIpaddress(nativePtr);
@@ -981,7 +1020,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized void startConferenceRecording(String path) {
 		startConferenceRecording(nativePtr,path);
 	}
-	
+
 	private native int stopConferenceRecording(long nativePtr);
 	@Override
 	public synchronized void stopConferenceRecording() {
@@ -991,13 +1030,13 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized PayloadType findPayloadType(String mime) {
 		return findPayloadType(mime, FIND_PAYLOAD_IGNORE_RATE);
 	}
-	
+
 	private native void setSipDscp(long nativePtr, int dscp);
 	@Override
 	public synchronized void setSipDscp(int dscp) {
 		setSipDscp(nativePtr,dscp);
 	}
-	
+
 	private native int getSipDscp(long nativePtr);
 	@Override
 	public synchronized int getSipDscp() {
@@ -1008,36 +1047,36 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized void setAudioDscp(int dscp) {
 		setAudioDscp(nativePtr, dscp);
 	}
-	
+
 	private native int getAudioDscp(long nativePtr);
 	@Override
 	public synchronized int getAudioDscp() {
 		return getAudioDscp(nativePtr);
 	}
-	
+
 	private native void setVideoDscp(long nativePtr, int dscp);
 	@Override
 	public synchronized void setVideoDscp(int dscp) {
 		setVideoDscp(nativePtr,dscp);
 	}
-	
+
 	private native int getVideoDscp(long nativePtr);
 	@Override
 	public synchronized int getVideoDscp() {
 		return getVideoDscp(nativePtr);
 	}
-	
+
 	private native long createInfoMessage(long nativeptr);
 	@Override
 	public synchronized LinphoneInfoMessage createInfoMessage() {
 		return new LinphoneInfoMessageImpl(createInfoMessage(nativePtr));
 	}
-	
+
 	private native Object subscribe(long coreptr, long addrptr, String eventname, int expires, String type, String subtype, byte data [], String encoding);
 	@Override
 	public synchronized LinphoneEvent subscribe(LinphoneAddress resource, String eventname,
 			int expires, LinphoneContent content) {
-		return (LinphoneEvent)subscribe(nativePtr, ((LinphoneAddressImpl)resource).nativePtr, eventname, expires, 
+		return (LinphoneEvent)subscribe(nativePtr, ((LinphoneAddressImpl)resource).nativePtr, eventname, expires,
 				content!=null ? content.getType() : null, content!=null ? content.getSubtype() : null, content!=null ? content.getData() : null,
 						content!=null ? content.getEncoding() : null);
 	}
@@ -1045,7 +1084,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 	@Override
 	public synchronized LinphoneEvent publish(LinphoneAddress resource, String eventname,
 			int expires, LinphoneContent content) {
-		return (LinphoneEvent)publish(nativePtr, ((LinphoneAddressImpl)resource).nativePtr, eventname, expires, 
+		return (LinphoneEvent)publish(nativePtr, ((LinphoneAddressImpl)resource).nativePtr, eventname, expires,
 				content!=null ? content.getType() : null, content!=null ? content.getSubtype() : null, content!=null ? content.getData() : null,
 						content!=null ? content.getEncoding() : null);
 	}
@@ -1062,15 +1101,15 @@ class LinphoneCoreImpl implements LinphoneCore {
 			String event, int expires) {
 		return (LinphoneEvent)createPublish(nativePtr, ((LinphoneAddressImpl)resource).nativePtr, event, expires);
 	}
-	
+
 	public synchronized void setChatDatabasePath(String path) {
 		setChatDatabasePath(nativePtr, path);
 	}
-	
+
 	public synchronized LinphoneChatRoom[] getChatRooms() {
 		long[] typesPtr = getChatRooms(nativePtr);
 		if (typesPtr == null) return null;
-		
+
 		LinphoneChatRoom[] proxies = new LinphoneChatRoom[typesPtr.length];
 
 		for (int i=0; i < proxies.length; i++) {
@@ -1082,7 +1121,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized LinphoneAuthInfo[] getAuthInfosList() {
 		long[] typesPtr = getAuthInfosList(nativePtr);
 		if (typesPtr == null) return null;
-		
+
 		LinphoneAuthInfo[] authInfos = new LinphoneAuthInfo[typesPtr.length];
 
 		for (int i=0; i < authInfos.length; i++) {
@@ -1091,12 +1130,12 @@ class LinphoneCoreImpl implements LinphoneCore {
 
 		return authInfos;
 	}
-	
+
 	public synchronized LinphoneAuthInfo findAuthInfo(String username, String realm, String domain) {
 		long ptr = findAuthInfos(nativePtr, username, realm, domain);
 		if (ptr == 0)
 			return null;
-		
+
 		return new LinphoneAuthInfoImpl(ptr);
 	}
 	private native LinphoneCall startReferedCall(long corePtr, long callptr, long paramsPtr);
@@ -1106,7 +1145,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 		long ptrParams =((LinphoneCallParamsImpl)params).nativePtr;
 		return startReferedCall(nativePtr, getCallPtr(call), ptrParams);
 	}
-	
+
 	private native String[] listSupportedVideoResolutions(long ptr);
 	@Override
 	public synchronized String[] getSupportedVideoSizes() {
@@ -1117,13 +1156,13 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized int migrateToMultiTransport() {
 		return migrateToMultiTransport(nativePtr);
 	}
-	
+
 	private native boolean acceptEarlyMedia(long lc, long call);
 	@Override
 	public synchronized boolean acceptEarlyMedia(LinphoneCall call) {
 		return acceptEarlyMedia(nativePtr, getCallPtr(call));
 	}
-	
+
 	private native boolean acceptEarlyMediaWithParams(long lc, long call, long params);
 	@Override
 	public synchronized boolean acceptEarlyMediaWithParams(LinphoneCall call,
@@ -1133,7 +1172,16 @@ class LinphoneCoreImpl implements LinphoneCore {
 	}
 	@Override
 	public synchronized LinphoneProxyConfig createProxyConfig() {
-		return new LinphoneProxyConfigImpl(this,createProxyConfig(nativePtr));
+		return new LinphoneProxyConfigImpl(this);
+	}
+	@Override
+	public synchronized LinphoneProxyConfig createProxyConfig(String identity,String proxy,String route, boolean enableRegister) throws LinphoneCoreException {
+		isValid();
+		try {
+			return new LinphoneProxyConfigImpl(this,identity,proxy,route,enableRegister);
+		} catch(LinphoneCoreException e){
+			return null;
+		}
 	}
 	@Override
 	public synchronized void setCallErrorTone(Reason reason, String path) {
@@ -1177,7 +1225,7 @@ class LinphoneCoreImpl implements LinphoneCore {
 	public synchronized boolean chatEnabled() {
 		return chatEnabled(nativePtr);
 	}
-	
+
 	@Override
 	public synchronized void stopRinging() {
 		stopRinging(nativePtr);
@@ -1193,13 +1241,53 @@ class LinphoneCoreImpl implements LinphoneCore {
 		return getPayloadTypeBitrate(nativePtr, ((PayloadTypeImpl)pt).nativePtr);
 	}
 	@Override
-	public void enableAdaptiveRateControl(boolean enable) {
+	public synchronized void enableAdaptiveRateControl(boolean enable) {
 		enableAdaptiveRateControl(nativePtr,enable);
-		
+
 	}
 	@Override
-	public boolean isAdaptiveRateControlEnabled() {
+	public synchronized boolean isAdaptiveRateControlEnabled() {
 		return isAdaptiveRateControlEnabled(nativePtr);
 	}
+	public synchronized AdaptiveRateAlgorithm getAdaptiveRateAlgorithm() {
+		return AdaptiveRateAlgorithm.fromString(getAdaptiveRateAlgorithm(nativePtr));
+	}
+	public synchronized void setAdaptiveRateAlgorithm(AdaptiveRateAlgorithm alg) {
+		setAdaptiveRateAlgorithm(nativePtr, alg.toString());
+	}
+
+
+	private native void setAudioJittcomp(long ptr, int value);
+	@Override
+	public synchronized void setAudioJittcomp(int value) {
+		setAudioJittcomp(nativePtr,value);
+	}
+	private native void setVideoJittcomp(long ptr, int value);
+	@Override
+	public synchronized void setVideoJittcomp(int value) {
+		setVideoJittcomp(nativePtr,value);
+	}
 	
+	private native void setFileTransferServer(long ptr, String serverUrl);
+	@Override
+	public synchronized void setFileTransferServer(String serverUrl) {
+		setFileTransferServer(nativePtr, serverUrl);
+	}
+	
+	private native String getFileTransferServer(long ptr);
+	@Override
+	public synchronized String getFileTransferServer() {
+		return getFileTransferServer(nativePtr);
+	}
+
+	private native long createLocalPlayer(long nativePtr, AndroidVideoWindowImpl window);
+	@Override
+	public synchronized LinphonePlayer createLocalPlayer(AndroidVideoWindowImpl window) {
+		long playerPtr = createLocalPlayer(nativePtr, window);
+		if(playerPtr != 0) {
+			return new LinphonePlayerImpl(playerPtr);
+		} else {
+			return null;
+		}
+	}
 }

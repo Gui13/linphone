@@ -65,10 +65,14 @@ LOCAL_SRC_FILES := \
 	xml2lpc.c \
 	lpc2xml.c \
 	remote_provisioning.c \
-	quality_reporting.c
+	quality_reporting.c \
+	call_log.c \
+	call_params.c \
+	player.c \
+	localplayer.c
 
-ifndef LINPHONE_VERSION
-LINPHONE_VERSION = "Devel"
+ifndef LIBLINPHONE_VERSION
+LIBLINPHONE_VERSION = "Devel"
 endif
 
 LOCAL_CFLAGS += \
@@ -77,7 +81,7 @@ LOCAL_CFLAGS += \
 	-DINET6 \
 	-DENABLE_TRACE \
 	-DHAVE_CONFIG_H \
-	-DLINPHONE_VERSION=\"$(LINPHONE_VERSION)\" \
+	-DLIBLINPHONE_VERSION=\"$(LIBLINPHONE_VERSION)\" \
 	-DLINPHONE_PLUGINS_DIR=\"\\tmp\" \
 	-DUSE_BELLESIP
 
@@ -261,6 +265,9 @@ LOCAL_MODULE := liblinphone
 LOCAL_MODULE_FILENAME := liblinphone-$(TARGET_ARCH_ABI)
 
 include $(BUILD_SHARED_LIBRARY)
+
+LOCAL_CPPFLAGS=$(LOCAL_CFLAGS)
+LOCAL_CFLAGS += -Wdeclaration-after-statement
 
 $(call import-module,android/cpufeatures)
 

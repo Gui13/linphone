@@ -69,7 +69,7 @@ static bool_t payload_type_enabled(const PayloadType *pt) {
 	return (((pt)->flags & PAYLOAD_TYPE_ENABLED)!=0);
 }
 
-bool_t linphone_core_payload_type_enabled(LinphoneCore *lc, const PayloadType *pt){
+bool_t linphone_core_payload_type_enabled(LinphoneCore *lc, const LinphonePayloadType *pt){
 	if (ms_list_find(lc->codecs_conf.audio_codecs, (PayloadType*) pt) || ms_list_find(lc->codecs_conf.video_codecs, (PayloadType*)pt)){
 		return payload_type_enabled(pt);
 	}
@@ -77,12 +77,12 @@ bool_t linphone_core_payload_type_enabled(LinphoneCore *lc, const PayloadType *p
 	return FALSE;
 }
 
-bool_t linphone_core_payload_type_is_vbr(LinphoneCore *lc, const PayloadType *pt){
+bool_t linphone_core_payload_type_is_vbr(LinphoneCore *lc, const LinphonePayloadType *pt){
 	if (pt->type==PAYLOAD_VIDEO) return TRUE;
 	return !!(pt->flags & PAYLOAD_TYPE_IS_VBR);
 }
 
-int linphone_core_enable_payload_type(LinphoneCore *lc, PayloadType *pt, bool_t enabled){
+int linphone_core_enable_payload_type(LinphoneCore *lc, LinphonePayloadType *pt, bool_t enabled){
 	if (ms_list_find(lc->codecs_conf.audio_codecs,pt) || ms_list_find(lc->codecs_conf.video_codecs,pt)){
 		payload_type_set_enable(pt,enabled);
 		_linphone_core_codec_config_write(lc);
@@ -108,7 +108,7 @@ const char *linphone_core_get_payload_type_description(LinphoneCore *lc, Payload
 	return NULL;
 }
 
-void linphone_core_set_payload_type_bitrate(LinphoneCore *lc, PayloadType *pt, int bitrate){
+void linphone_core_set_payload_type_bitrate(LinphoneCore *lc, LinphonePayloadType *pt, int bitrate){
 	if (ms_list_find(lc->codecs_conf.audio_codecs, (PayloadType*) pt) || ms_list_find(lc->codecs_conf.video_codecs, (PayloadType*)pt)){
 		if (pt->type==PAYLOAD_VIDEO || pt->flags & PAYLOAD_TYPE_IS_VBR){
 			pt->normal_bitrate=bitrate*1000;
@@ -117,8 +117,9 @@ void linphone_core_set_payload_type_bitrate(LinphoneCore *lc, PayloadType *pt, i
 			ms_error("Cannot set an explicit bitrate for codec %s/%i, because it is not VBR.",pt->mime_type,pt->clock_rate);
 			return;
 		}
+	} else {
+		ms_error("linphone_core_set_payload_type_bitrate() payload type not in audio or video list !");
 	}
-	ms_error("linphone_core_set_payload_type_bitrate() payload type not in audio or video list !");
 }
 
 
@@ -131,7 +132,7 @@ static double get_audio_payload_bandwidth_from_codec_bitrate(const PayloadType *
 	double npacket=50;
 	double packet_size;
 	int bitrate;
-	
+
 	if (strcmp(payload_type_get_mime(&payload_type_aaceld_44k), payload_type_get_mime(pt))==0) {
 		/*special case of aac 44K because ptime= 10ms*/
 		npacket=100;
@@ -181,7 +182,7 @@ static int get_audio_payload_bandwidth(LinphoneCore *lc, const PayloadType *pt, 
 	}else return (int)ceil(get_audio_payload_bandwidth_from_codec_bitrate(pt)/1000.0);/*rounding codec bandwidth should be avoid, specially for AMR*/
 }
 
-int linphone_core_get_payload_type_bitrate(LinphoneCore *lc, const PayloadType *pt){
+int linphone_core_get_payload_type_bitrate(LinphoneCore *lc, const LinphonePayloadType *pt){
 	int maxbw=get_min_bandwidth(linphone_core_get_download_bandwidth(lc),
 					linphone_core_get_upload_bandwidth(lc));
 	if (pt->type==PAYLOAD_AUDIO_CONTINUOUS || pt->type==PAYLOAD_AUDIO_PACKETIZED){
@@ -209,7 +210,7 @@ void linphone_core_update_allocated_audio_bandwidth(LinphoneCore *lc){
 	int maxbw=get_min_bandwidth(linphone_core_get_download_bandwidth(lc),
 					linphone_core_get_upload_bandwidth(lc));
 	int max_codec_bitrate=0;
-	
+
 	for(elem=linphone_core_get_audio_codecs(lc);elem!=NULL;elem=elem->next){
 		PayloadType *pt=(PayloadType*)elem->data;
 		if (payload_type_enabled(pt)){
@@ -250,7 +251,19 @@ bool_t linphone_core_is_payload_type_usable_for_bandwidth(LinphoneCore *lc, cons
 
 /* return TRUE if codec can be used with bandwidth, FALSE else*/
 bool_t linphone_core_check_payload_type_usability(LinphoneCore *lc, const PayloadType *pt){
-	return linphone_core_is_payload_type_usable_for_bandwidth(lc, pt, linphone_core_get_payload_type_bitrate(lc,pt));
+	bool_t ret=linphone_core_is_payload_type_usable_for_bandwidth(lc, pt, linphone_core_get_payload_type_bitrate(lc,pt));
+	if ((pt->type==PAYLOAD_AUDIO_CONTINUOUS || pt->type==PAYLOAD_AUDIO_PACKETIZED)
+		&& lc->sound_conf.capt_sndcard 
+		&& !(ms_snd_card_get_capabilities(lc->sound_conf.capt_sndcard) & MS_SND_CARD_CAP_BUILTIN_ECHO_CANCELLER)
+		&& linphone_core_echo_cancellation_enabled(lc)
+		&& (pt->clock_rate!=16000 && pt->clock_rate!=8000)
+		&& strcasecmp(pt->mime_type,"opus")!=0
+		&& ms_filter_lookup_by_name("MSWebRTCAEC")!=NULL){
+		ms_warning("Payload type %s/%i cannot be used because software echo cancellation is required but is unable to operate at this rate.",
+			   pt->mime_type,pt->clock_rate);
+		ret=FALSE;
+	}
+	return ret;
 }
 
 bool_t lp_spawn_command_line_sync(const char *command, char **result,int *command_ret){
@@ -421,8 +434,7 @@ int linphone_core_run_stun_tests(LinphoneCore *lc, LinphoneCall *call){
 			ms_error("Could not obtain stun server addrinfo.");
 			return -1;
 		}
-		if (lc->vtable.display_status!=NULL)
-			lc->vtable.display_status(lc,_("Stun lookup in progress..."));
+		linphone_core_notify_display_status(lc,_("Stun lookup in progress..."));
 
 		/*create the two audio and video RTP sockets, and send STUN message to our stun server */
 		sock1=create_socket(call->media_ports[0].rtp_port);
@@ -603,8 +615,7 @@ int linphone_core_gather_ice_candidates(LinphoneCore *lc, LinphoneCall *call)
 		ms_warning("Fail to resolve STUN server for ICE gathering.");
 		return -1;
 	}
-	if (lc->vtable.display_status != NULL)
-		lc->vtable.display_status(lc, _("ICE local candidates gathering in progress..."));
+	linphone_core_notify_display_status(lc, _("ICE local candidates gathering in progress..."));
 
 	/* Gather local host candidates. */
 	if (linphone_core_get_local_ip_for(AF_INET, NULL, local_addr) < 0) {
@@ -658,7 +669,7 @@ void linphone_core_update_ice_state_in_call_stats(LinphoneCall *call)
 		} else {
 			call->stats[LINPHONE_CALL_STATS_AUDIO].ice_state = LinphoneIceStateFailed;
 		}
-		if (call->params.has_video && (video_check_list != NULL)) {
+		if (call->params->has_video && (video_check_list != NULL)) {
 			if (ice_check_list_state(video_check_list) == ICL_Completed) {
 				switch (ice_check_list_selected_valid_candidate_type(video_check_list)) {
 					case ICT_HostCandidate:
@@ -678,12 +689,12 @@ void linphone_core_update_ice_state_in_call_stats(LinphoneCall *call)
 		}
 	} else if (session_state == IS_Running) {
 		call->stats[LINPHONE_CALL_STATS_AUDIO].ice_state = LinphoneIceStateInProgress;
-		if (call->params.has_video && (video_check_list != NULL)) {
+		if (call->params->has_video && (video_check_list != NULL)) {
 			call->stats[LINPHONE_CALL_STATS_VIDEO].ice_state = LinphoneIceStateInProgress;
 		}
 	} else {
 		call->stats[LINPHONE_CALL_STATS_AUDIO].ice_state = LinphoneIceStateFailed;
-		if (call->params.has_video && (video_check_list != NULL)) {
+		if (call->params->has_video && (video_check_list != NULL)) {
 			call->stats[LINPHONE_CALL_STATS_VIDEO].ice_state = LinphoneIceStateFailed;
 		}
 	}
@@ -939,23 +950,11 @@ void linphone_core_update_ice_from_remote_media_description(LinphoneCall *call, 
 bool_t linphone_core_media_description_contains_video_stream(const SalMediaDescription *md){
 	int i;
 
-	for (i = 0; i < md->nb_streams; i++) {
+	for (i = 0; md && i < md->nb_streams; i++) {
 		if (md->streams[i].type == SalVideo && md->streams[i].rtp_port!=0)
 			return TRUE;
 	}
 	return FALSE;
-}
-
-LinphoneCall * is_a_linphone_call(void *user_pointer){
-	LinphoneCall *call=(LinphoneCall*)user_pointer;
-	if (call==NULL) return NULL;
-	return call->magic==linphone_call_magic ? call : NULL;
-}
-
-LinphoneProxyConfig * is_a_linphone_proxy_config(void *user_pointer){
-	LinphoneProxyConfig *cfg=(LinphoneProxyConfig*)user_pointer;
-	if (cfg==NULL) return NULL;
-	return cfg->magic==linphone_proxy_config_magic ? cfg : NULL;
 }
 
 unsigned int linphone_core_get_audio_features(LinphoneCore *lc){
@@ -980,6 +979,8 @@ unsigned int linphone_core_get_audio_features(LinphoneCore *lc){
 			else if (strcasecmp(name,"DTMF")==0) ret|=AUDIO_STREAM_FEATURE_DTMF;
 			else if (strcasecmp(name,"DTMF_ECHO")==0) ret|=AUDIO_STREAM_FEATURE_DTMF_ECHO;
 			else if (strcasecmp(name,"MIXED_RECORDING")==0) ret|=AUDIO_STREAM_FEATURE_MIXED_RECORDING;
+			else if (strcasecmp(name,"LOCAL_PLAYING")==0) ret|=AUDIO_STREAM_FEATURE_LOCAL_PLAYING;
+			else if (strcasecmp(name,"REMOTE_PLAYING")==0) ret|=AUDIO_STREAM_FEATURE_REMOTE_PLAYING;
 			else if (strcasecmp(name,"ALL")==0) ret|=AUDIO_STREAM_FEATURE_ALL;
 			else if (strcasecmp(name,"NONE")==0) ret=0;
 			else ms_error("Unsupported audio feature %s requested in config file.",name);
@@ -1008,7 +1009,7 @@ static int get_local_ip_with_getifaddrs(int type, char *address, int size){
 	struct ifaddrs *ifpstart;
 	char retaddr[LINPHONE_IPADDR_SIZE]={0};
 	bool_t found=FALSE;
-	
+
 	if (getifaddrs(&ifpstart) < 0) {
 		return -1;
 	}
@@ -1109,6 +1110,9 @@ static int get_local_ip_for_with_connect(int type, const char *dest, char *resul
 
 int linphone_core_get_local_ip_for(int type, const char *dest, char *result){
 	int err;
+#ifdef HAVE_GETIFADDRS
+	int found_ifs;
+#endif
 	strcpy(result,type==AF_INET ? "127.0.0.1" : "::1");
 
 	if (dest==NULL){
@@ -1124,8 +1128,6 @@ int linphone_core_get_local_ip_for(int type, const char *dest, char *result){
 
 #ifdef HAVE_GETIFADDRS
 	/*we use getifaddrs for lookup of default interface */
-	int found_ifs;
-
 	found_ifs=get_local_ip_with_getifaddrs(type,result,LINPHONE_IPADDR_SIZE);
 	if (found_ifs==1){
 		return 0;
@@ -1135,6 +1137,26 @@ int linphone_core_get_local_ip_for(int type, const char *dest, char *result){
 	}
 #endif
 	return 0;
+}
+
+void linphone_core_get_local_ip(LinphoneCore *lc, int af, const char *dest, char *result) {
+	if (af == AF_UNSPEC) {
+		if (linphone_core_ipv6_enabled(lc)) {
+			bool_t has_ipv6 = linphone_core_get_local_ip_for(AF_INET6, dest, result) == 0;
+			if (strcmp(result, "::1") != 0)
+				return; /*this machine has real ipv6 connectivity*/
+			if ((linphone_core_get_local_ip_for(AF_INET, dest, result) == 0) && (strcmp(result, "127.0.0.1") != 0))
+				return; /*this machine has only ipv4 connectivity*/
+			if (has_ipv6) {
+				/*this machine has only local loopback for both ipv4 and ipv6, so prefer ipv6*/
+				strncpy(result, "::1", LINPHONE_IPADDR_SIZE);
+				return;
+			}
+		}
+		/*in all other cases use IPv4*/
+		af = AF_INET;
+	}
+	linphone_core_get_local_ip_for(af, dest, result);
 }
 
 SalReason linphone_reason_to_sal(LinphoneReason reason){

@@ -58,6 +58,9 @@ extern test_suite_t flexisip_test_suite;
 extern test_suite_t stun_test_suite;
 extern test_suite_t remote_provisioning_test_suite;
 extern test_suite_t quality_reporting_test_suite;
+extern test_suite_t log_collection_test_suite;
+extern test_suite_t transport_test_suite;
+extern test_suite_t player_test_suite;
 
 
 extern int liblinphone_tester_nb_test_suites(void);
@@ -114,6 +117,8 @@ typedef struct _stats {
 	int number_of_LinphoneCallIncomingEarlyMedia;
 	int number_of_LinphoneCallUpdating;
 	int number_of_LinphoneCallReleased;
+	int number_of_LinphoneCallEarlyUpdatedByRemote;
+	int number_of_LinphoneCallEarlyUpdating;
 
 	int number_of_LinphoneTransferCallOutgoingInit;
 	int number_of_LinphoneTransferCallOutgoingProgress;
@@ -192,6 +197,9 @@ typedef struct _stats {
 
 	int number_of_LinphoneCallEncryptedOn;
 	int number_of_LinphoneCallEncryptedOff;
+	int number_of_NetworkReachableTrue;
+	int number_of_NetworkReachableFalse;
+	int number_of_player_eof;
 	LinphoneChatMessage* last_received_chat_message;
 }stats;
 
@@ -219,7 +227,7 @@ void text_message_received(LinphoneCore *lc, LinphoneChatRoom *room, const Linph
 void message_received(LinphoneCore *lc, LinphoneChatRoom *room, LinphoneChatMessage* message);
 void file_transfer_received(LinphoneCore *lc, LinphoneChatMessage *message, const LinphoneContent* content, const char* buff, size_t size);
 void file_transfer_send(LinphoneCore *lc, LinphoneChatMessage *message,  const LinphoneContent* content, char* buff, size_t* size);
-void file_transfer_progress_indication(LinphoneCore *lc, LinphoneChatMessage *message, const LinphoneContent* content, size_t progress);
+void file_transfer_progress_indication(LinphoneCore *lc, LinphoneChatMessage *message, const LinphoneContent* content, size_t offset, size_t total);
 void is_composing_received(LinphoneCore *lc, LinphoneChatRoom *room);
 void info_message_received(LinphoneCore *lc, LinphoneCall *call, const LinphoneInfoMessage *msg);
 void new_subscription_requested(LinphoneCore *lc, LinphoneFriend *lf, const char *url);
@@ -239,6 +247,7 @@ bool_t call_with_params(LinphoneCoreManager* caller_mgr
 						, const LinphoneCallParams *caller_params
 						, const LinphoneCallParams *callee_params);
 bool_t call(LinphoneCoreManager* caller_mgr,LinphoneCoreManager* callee_mgr);
+void end_call(LinphoneCoreManager *m1, LinphoneCoreManager *m2);
 stats * get_stats(LinphoneCore *lc);
 LinphoneCoreManager *get_manager(LinphoneCore *lc);
 const char *liblinphone_tester_get_subscribe_content(void);
